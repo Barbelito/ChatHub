@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="ChatBook - enkel realtidschatt med SignalR"
+    />
+
+    <title>ChatBook</title>
+
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <main class="app" id="app">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand__logo">C</div>
+
+          <div>
+            <h1>ChatBook</h1>
+            <p>SignalR Chat</p>
+          </div>
+        </div>
+
+        <!-- Inloggning och användarinformation -->
+        <section class="sidebar__section">
+          <h2>Användare</h2>
+
+          <div id="login-panel">
+            <label for="username">Användarnamn</label>
+
+            <div class="input-group">
+              <input
+                id="username"
+                type="text"
+                placeholder="Ange ditt namn"
+                maxlength="30"
+                autocomplete="username"
+                required
+              />
+
+              <button id="connect-button" type="button">Anslut</button>
+            </div>
+          </div>
+
+          <div id="user-panel" class="user-panel hidden">
+            <div class="avatar" id="user-avatar">?</div>
+
+            <div>
+              <strong id="current-user">Okänd</strong>
+              <span class="user-panel__label">Inloggad</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Lista över chattrum -->
+        <section class="sidebar__section">
+          <div class="section-heading">
+            <h2>Chattrum</h2>
+
+            <button
+              id="create-room-button"
+              class="icon-button"
+              type="button"
+              title="Skapa rum"
+              disabled
+            >
+              +
+            </button>
+          </div>
+
+          <nav id="room-list" class="rooms" aria-label="Chattrum">
+            <button class="room room--active" type="button" data-room="general">
+              <span>#</span>
+              Allmänt
+            </button>
+
+            <!-- Privata rum läggs till här från backend -->
+          </nav>
+        </section>
+      </aside>
+
+      <!-- Chatt -->
+      <section class="chat">
+        <!-- Chatt header -->
+        <header class="chat__header">
+          <div>
+            <span class="chat__eyebrow">Chattrum</span>
+            <h2 id="room-name"># Allmänt</h2>
+          </div>
+
+          <div
+            id="connection-status"
+            class="status status--offline"
+            role="status"
+            aria-live="polite"
+          >
+            <span class="status__dot"></span>
+            <span id="status-text">Ej ansluten</span>
+          </div>
+        </header>
+
+        <!-- Meddelanden -->
+        <div class="messages-wrapper">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-state__icon">💬</div>
+
+            <h3>Välkommen till ChatBook</h3>
+
+            <p>Ange ett användarnamn och anslut för att börja chatta.</p>
+          </div>
+
+          <ul
+            id="messages"
+            class="messages"
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions"
+          ></ul>
+        </div>
+
+        <!-- Skicka meddelande -->
+        <footer class="chat__footer">
+          <form id="send-form" class="send-form">
+            <label class="sr-only" for="message"> Meddelande </label>
+
+            <input
+              id="message"
+              type="text"
+              placeholder="Skriv ett meddelande..."
+              maxlength="500"
+              autocomplete="off"
+              disabled
+              required
+            />
+
+            <button id="send-button" type="submit" disabled>Skicka</button>
+          </form>
+
+          <div class="chat__footer-info">
+            <span id="character-count">0 / 500</span>
+            <span>Enter för att skicka</span>
+          </div>
+        </footer>
+      </section>
+    </main>
+
+    <div id="notification-container"></div>
+
+    <script src="lib/signalr.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
