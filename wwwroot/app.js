@@ -37,8 +37,10 @@ const connection = new signalR.HubConnectionBuilder()
 // Tar emot meddelanden från servern
 // =========================
 
-connection.on("ReceiveMessage", (username, message) => {
-  addMessage(username, message);
+connection.on("ReceiveMessage", (sender, message) => {
+  const ownMessage = sender === username;
+
+  addMessage(sender, message, ownMessage);
 });
 
 let username = "";
@@ -152,9 +154,9 @@ function addOwnMessage(text) {
 // Lägg till meddelande
 // =========================
 
-function addMessage(username, text) {
+function addMessage(sender, text, ownMessage) {
   const li = document.createElement("li");
-  li.className = "message";
+  li.className = ownMessage ? "message message--own" : "message";
 
   const time = new Date().toLocaleTimeString([], {
     hour: "2-digit",
@@ -163,7 +165,7 @@ function addMessage(username, text) {
 
   li.innerHTML = `
       <div class="message__header">
-          <span class="message__username">${username}</span>
+          <span class="message__username">${sender}</span>
           <span class="message__time">${time}</span>
       </div>
 
