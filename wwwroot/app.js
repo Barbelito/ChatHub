@@ -20,19 +20,35 @@ const sendForm = document.getElementById("send-form");
 const messageInput = document.getElementById("message");
 const sendButton = document.getElementById("send-button");
 
+// Messages
 const messages = document.getElementById("messages");
+const messagesWrapper = document.querySelector(".messages-wrapper");
 
-// Sparar namnet på den aktuella användaren
+// =========================
+// Skapar SignalR-anslutningen
+// =========================
+
+const connection = new signalR.HubConnectionBuilder()
+  .withUrl("/chatHub")
+  .withAutomaticReconnect()
+  .build();
+
+// =========================
+// Tar emot meddelanden från servern
+// =========================
+
+connection.on("ReceiveMessage", (username, message) => {
+  addMessage(username, message);
+});
+
 let username = "";
 
 // =========================
 // Händelser
 // =========================
 
-// Anslut när användaren klickar på knappen
 connectButton.addEventListener("click", connect);
 
-// Tillåt Enter för att ansluta
 usernameInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     connect();
@@ -43,83 +59,77 @@ usernameInput.addEventListener("keydown", (event) => {
 // Anslut användaren
 // =========================
 
-function connect() {
-  // Hämtar användarnamnet och tar bort eventuella mellanslag
+async function connect() {
   const name = usernameInput.value.trim();
 
-  // Kontrollera att användarnamn är ifyllt
   if (name === "") {
     alert("Ange ett användarnamn.");
-
     usernameInput.focus();
-
     return;
   }
 
-  // Sparar användarnamnet
   username = name;
 
-  // Uppdaterar användarpanelen
   currentUser.textContent = username;
   userAvatar.textContent = username.charAt(0).toUpperCase();
 
-  // Dölj login och visa användarinformation
   loginPanel.classList.add("hidden");
   userPanel.classList.remove("hidden");
 
-  // Uppdatera anslutningsstatus
-  connectionStatus.classList.remove("status--offline");
-  connectionStatus.classList.add("status--online");
+  try {
+    await connection.start();
 
-  statusText.textContent = "Ansluten";
+    connectionStatus.classList.remove("status--offline");
+    connectionStatus.classList.add("status--online");
 
-  // Aktivera chatten
-  messageInput.disabled = false;
-  sendButton.disabled = false;
+    statusText.textContent = "Ansluten";
 
-  // Dölj välkomstmeddelandet
-  emptyState.classList.add("hidden");
+    messageInput.disabled = false;
+    sendButton.disabled = false;
 
-  // Visa ett systemmeddelande
-  addSystemMessage(`${username} anslöt till chatten.`);
+    emptyState.classList.add("hidden");
+
+    addSystemMessage(`${username} anslöt till chatten.`);
+  } catch (error) {
+    console.error(error);
+
+    connectionStatus.classList.remove("status--online");
+    connectionStatus.classList.add("status--offline");
+
+    statusText.textContent = "Anslutning misslyckades";
+  }
 }
 
 // =========================
 // Skicka meddelande
 // =========================
 
-sendForm.addEventListener("submit", (event) => {
+sendForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const text = messageInput.value.trim();
 
-  // Skicka inte tomma meddelanden
   if (text === "") return;
 
-  addOwnMessage(text);
+  await connection.invoke("SendMessage", username, text);
 
-  // Rensa textrutan
   messageInput.value = "";
-
   messageInput.focus();
 });
 
 // =========================
-// Lägg till ett eget meddelande
+// Lägg till eget meddelande
 // =========================
 
 function addOwnMessage(text) {
   const li = document.createElement("li");
-
   li.className = "message message--own";
 
-  // Hämtar aktuell tid
   const time = new Date().toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   });
 
-  // Skapar meddelandets HTML
   li.innerHTML = `
         <div class="message__header">
             <span class="message__username">${username}</span>
@@ -131,23 +141,84 @@ function addOwnMessage(text) {
         </div>
     `;
 
-  // Lägger till meddelandet i chatten
   messages.appendChild(li);
 
-  // Scrollar automatiskt längst ner
-  messages.scrollTop = messages.scrollHeight;
+  requestAnimationFrame(() => {
+    messagesWrapper.scrollTop = messagesWrapper.scrollHeight;
+  });
 }
 
 // =========================
-// Lägg till ett systemmeddelande
+// Lägg till meddelande
+// =========================
+
+function addMessage(username, text) {
+  const li = document.createElement("li");
+  li.className = "message";
+
+  const time = new Date().toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  li.innerHTML = `
+      <div class="message__header">
+          <span class="message__username">${username}</span>
+          <span class="message__time">${time}</span>
+      </div>
+
+      <div class="message__content">
+          ${text}
+      </div>
+  `;
+
+  messages.appendChild(li);
+
+  requestAnimationFrame(() => {
+    messagesWrapper.scrollTop = messagesWrapper.scrollHeight;
+  });
+}
+
+// =========================
+// Systemmeddelanden
 // =========================
 
 function addSystemMessage(text) {
   const li = document.createElement("li");
-
   li.className = "message message--system";
-
   li.textContent = text;
 
   messages.appendChild(li);
+
+  requestAnimationFrame(() => {
+    messagesWrapper.scrollTop = messagesWrapper.scrollHeight;
+  });
 }
+
+// =========================
+// Hantera anslutningsstatus
+// =========================
+
+connection.onclose(() => {
+  connectionStatus.classList.remove("status--online");
+  connectionStatus.classList.add("status--offline");
+
+  statusText.textContent = "Ej ansluten";
+
+  messageInput.disabled = true;
+  sendButton.disabled = true;
+});
+
+connection.onreconnecting(() => {
+  connectionStatus.classList.remove("status--online");
+  connectionStatus.classList.add("status--offline");
+
+  statusText.textContent = "Återansluter...";
+});
+
+connection.onreconnected(() => {
+  connectionStatus.classList.remove("status--offline");
+  connectionStatus.classList.add("status--online");
+
+  statusText.textContent = "Ansluten";
+});
