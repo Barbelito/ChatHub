@@ -22,6 +22,12 @@ const sendButton = document.getElementById("send-button");
 
 const messages = document.getElementById("messages");
 
+// Skapar SignalR anslutningen
+const connection = new signalR.HubConnectionBuilder()
+  .withUrl("/chatHub")
+  .withAutomaticReconnect()
+  .build();
+
 // Sparar namnet på den aktuella användaren
 let username = "";
 
@@ -43,7 +49,7 @@ usernameInput.addEventListener("keydown", (event) => {
 // Anslut användaren
 // =========================
 
-function connect() {
+async function connect() {
   // Hämtar användarnamnet och tar bort eventuella mellanslag
   const name = usernameInput.value.trim();
 
@@ -68,20 +74,28 @@ function connect() {
   userPanel.classList.remove("hidden");
 
   // Uppdatera anslutningsstatus
-  connectionStatus.classList.remove("status--offline");
-  connectionStatus.classList.add("status--online");
+  try {
+    await connection.start();
 
-  statusText.textContent = "Ansluten";
+    connectionStatus.classList.remove("status--offline");
+    connectionStatus.classList.add("status--online");
 
-  // Aktivera chatten
-  messageInput.disabled = false;
-  sendButton.disabled = false;
+    statusText.textContent = "Ansluten";
 
-  // Dölj välkomstmeddelandet
-  emptyState.classList.add("hidden");
+    messageInput.disabled = false;
+    sendButton.disabled = false;
 
-  // Visa ett systemmeddelande
-  addSystemMessage(`${username} anslöt till chatten.`);
+    emptyState.classList.add("hidden");
+
+    addSystemMessage(`${username} anslöt till chatten.`);
+  } catch (error) {
+    console.error(error);
+
+    connectionStatus.classList.remove("status--online");
+    connectionStatus.classList.add("status--offline");
+
+    statusText.textContent = "Anslutning misslyckades";
+  }
 }
 
 // =========================
@@ -151,3 +165,27 @@ function addSystemMessage(text) {
 
   messages.appendChild(li);
 }
+
+connection.onclose(() => {
+  connectionStatus.classList.remove("status--online");
+  connectionStatus.classList.add("status--offline");
+
+  statusText.textContent = "Ej ansluten";
+
+  messageInput.disabled = true;
+  sendButton.disabled = true;
+});
+
+connection.onreconnecting(() => {
+  connectionStatus.classList.remove("status--online");
+  connectionStatus.classList.add("status--offline");
+
+  statusText.textContent = "Återansluter...";
+});
+
+connection.onreconnected(() => {
+  connectionStatus.classList.remove("status--offline");
+  connectionStatus.classList.add("status--online");
+
+  statusText.textContent = "Ansluten";
+});
