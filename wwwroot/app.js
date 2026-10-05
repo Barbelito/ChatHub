@@ -20,7 +20,6 @@ const sendForm = document.getElementById("send-form");
 const messageInput = document.getElementById("message");
 const sendButton = document.getElementById("send-button");
 
-// Messages
 const messages = document.getElementById("messages");
 const messagesWrapper = document.querySelector(".messages-wrapper");
 
@@ -37,10 +36,15 @@ const connection = new signalR.HubConnectionBuilder()
 // Tar emot meddelanden från servern
 // =========================
 
+// Vanliga chatmeddelanden
 connection.on("ReceiveMessage", (sender, message) => {
   const ownMessage = sender === username;
-
   addMessage(sender, message, ownMessage);
+});
+
+// Systemmeddelanden (anslöt/lämnade)
+connection.on("ReceiveSystemMessage", (message) => {
+  addSystemMessage(message);
 });
 
 let username = "";
@@ -52,9 +56,7 @@ let username = "";
 connectButton.addEventListener("click", connect);
 
 usernameInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    connect();
-  }
+  if (event.key === "Enter") connect();
 });
 
 // =========================
@@ -63,7 +65,6 @@ usernameInput.addEventListener("keydown", (event) => {
 
 async function connect() {
   const name = usernameInput.value.trim();
-
   if (name === "") {
     alert("Ange ett användarnamn.");
     usernameInput.focus();
@@ -72,6 +73,7 @@ async function connect() {
 
   username = name;
 
+  // Uppdaterar UI med användarinfo
   currentUser.textContent = username;
   userAvatar.textContent = username.charAt(0).toUpperCase();
 
@@ -79,25 +81,26 @@ async function connect() {
   userPanel.classList.remove("hidden");
 
   try {
+    // Startar anslutningen
     await connection.start();
 
+    // Registrerar användaren i hubben
+    await connection.invoke("JoinChat", username);
+
+    // Uppdaterar status
     connectionStatus.classList.remove("status--offline");
     connectionStatus.classList.add("status--online");
-
     statusText.textContent = "Ansluten";
 
     messageInput.disabled = false;
     sendButton.disabled = false;
 
     emptyState.classList.add("hidden");
-
-    addSystemMessage(`${username} anslöt till chatten.`);
   } catch (error) {
     console.error(error);
 
     connectionStatus.classList.remove("status--online");
     connectionStatus.classList.add("status--offline");
-
     statusText.textContent = "Anslutning misslyckades";
   }
 }
@@ -110,45 +113,14 @@ sendForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
   const text = messageInput.value.trim();
-
   if (text === "") return;
 
+  // Skickar meddelandet till hubben
   await connection.invoke("SendMessage", username, text);
 
   messageInput.value = "";
   messageInput.focus();
 });
-
-// =========================
-// Lägg till eget meddelande
-// =========================
-
-function addOwnMessage(text) {
-  const li = document.createElement("li");
-  li.className = "message message--own";
-
-  const time = new Date().toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-
-  li.innerHTML = `
-        <div class="message__header">
-            <span class="message__username">${username}</span>
-            <span class="message__time">${time}</span>
-        </div>
-
-        <div class="message__content">
-            ${text}
-        </div>
-    `;
-
-  messages.appendChild(li);
-
-  requestAnimationFrame(() => {
-    messagesWrapper.scrollTop = messagesWrapper.scrollHeight;
-  });
-}
 
 // =========================
 // Lägg till meddelande
@@ -168,7 +140,6 @@ function addMessage(sender, text, ownMessage) {
           <span class="message__username">${sender}</span>
           <span class="message__time">${time}</span>
       </div>
-
       <div class="message__content">
           ${text}
       </div>
@@ -204,7 +175,6 @@ function addSystemMessage(text) {
 connection.onclose(() => {
   connectionStatus.classList.remove("status--online");
   connectionStatus.classList.add("status--offline");
-
   statusText.textContent = "Ej ansluten";
 
   messageInput.disabled = true;
@@ -214,13 +184,11 @@ connection.onclose(() => {
 connection.onreconnecting(() => {
   connectionStatus.classList.remove("status--online");
   connectionStatus.classList.add("status--offline");
-
   statusText.textContent = "Återansluter...";
 });
 
 connection.onreconnected(() => {
   connectionStatus.classList.remove("status--offline");
   connectionStatus.classList.add("status--online");
-
   statusText.textContent = "Ansluten";
 });
