@@ -96,8 +96,6 @@ async function connect() {
     sendButton.disabled = false;
 
     emptyState.classList.add("hidden");
-
-    addSystemMessage(`${username} anslöt till chatten.`);
   } catch (error) {
     console.error(error);
 
