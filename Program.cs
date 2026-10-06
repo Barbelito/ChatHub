@@ -14,20 +14,33 @@ var builder = WebApplication.CreateBuilder(args);
 // Registrerar SignalR
 builder.Services.AddSignalR();
 
-// Konfigurerar Kestrel
+// Konfigurerar Kestrel (stöd för både HTTP/1.1 och HTTP/2)
 builder.WebHost.ConfigureKestrel(kestrel =>
     kestrel.ConfigureEndpointDefaults(endpoint =>
-        endpoint.Protocols = HttpProtocols.Http1));
+        endpoint.Protocols = HttpProtocols.Http1AndHttp2));
 
 // Registrerar JWT service
 builder.Services.AddScoped<JwtService>();
-        
+
 // Registrera databasen
 builder.Services.AddDbContext<ChatDbContext>(options =>
     options.UseSqlite("Data Source=chatbook.db"));
 
 // Registrera hasher
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+
+// CORS – behövs för frontend + SignalR
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy
+            .WithOrigins("https://localhost")
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+    });
+});
 
 // Aktiverar autentisering och anger att JWT ska vara standardmetoden
 builder.Services
@@ -45,11 +58,14 @@ builder.Services
                 // Kontrollera att signaturen är korrekt (dvs rätt hemlig nyckel)
                 ValidateIssuerSigningKey = true,
 
-                // Värden hämtas från user secrets / appsettings
+                // Ingen extra giltighetstid efter att token gått ut
+                ClockSkew = TimeSpan.Zero,
+
+                // Värden hämtas från User Secrets
                 ValidIssuer = builder.Configuration["Jwt:Issuer"],
                 ValidAudience = builder.Configuration["Jwt:Audience"],
 
-                // Skapar en symmetrisk nyckel från den hemliga JWT-nyckel
+                // Skapar en symmetrisk nyckel från den hemliga JWT-nyckeln
                 IssuerSigningKey =
                     new SymmetricSecurityKey(
                         Encoding.UTF8.GetBytes(
@@ -58,20 +74,24 @@ builder.Services
             };
     });
 
-
 // Aktiverar authorization (krav på roller, policies, [Authorize]-attribut)
 builder.Services.AddAuthorization();
 
-
 var app = builder.Build();
 
+// Omdirigerar HTTP till HTTPS
+app.UseHttpsRedirection();
 
+// Aktiverar CORS
+app.UseCors();
+
+// API - Registrering
 app.MapPost("/api/register", async (
     RegisterRequest request,
     ChatDbContext db,
     IPasswordHasher<User> passwordHasher) =>
 {
-    // Trimma användarnamnet för att undvika mellanslag-problem
+    // Trimma användarnamnet för att undvika mellanslag
     var username = request.Username.Trim();
 
     // Grundläggande validering av input
@@ -112,20 +132,25 @@ app.MapPost("/api/register", async (
     return Results.Ok("Kontot skapades.");
 });
 
+// API - Inloggning
 app.MapPost("/api/login", async (
     LoginRequest request,
     ChatDbContext db,
     IPasswordHasher<User> passwordHasher,
     JwtService jwtService) =>
 {
+    // Trimma användarnamnet
+    var username = request.Username.Trim();
+
     // Hämta användaren
     var user = await db.Users
-        .FirstOrDefaultAsync(u => u.Username == request.Username);
+        .FirstOrDefaultAsync(u => u.Username == username);
 
+    // Samma felmeddelande används oavsett om användaren finns eller inte
     if (user is null)
         return Results.BadRequest("Fel användarnamn eller lösenord.");
 
-    // Verifiera lösenord
+    // Verifiera lösenordet
     var result = passwordHasher.VerifyHashedPassword(
         user,
         user.PasswordHash,
@@ -137,18 +162,18 @@ app.MapPost("/api/login", async (
     // Token skapas
     var token = jwtService.GenerateToken(user.Username);
 
-    // Token returneras
+    // Token returneras till klienten
     return Results.Ok(new
     {
         token
     });
 });
 
-
 // Serverar filer från wwwroot
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+// Aktiverar autentisering och authorization
 app.UseAuthentication();
 app.UseAuthorization();
 
