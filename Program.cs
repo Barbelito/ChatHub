@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
+using ChatHub.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +19,8 @@ builder.WebHost.ConfigureKestrel(kestrel =>
     kestrel.ConfigureEndpointDefaults(endpoint =>
         endpoint.Protocols = HttpProtocols.Http1));
 
+// Registrerar JWT service
+builder.Services.AddScoped<JwtService>();
         
 // Registrera databasen
 builder.Services.AddDbContext<ChatDbContext>(options =>
@@ -109,6 +112,37 @@ app.MapPost("/api/register", async (
     return Results.Ok("Kontot skapades.");
 });
 
+app.MapPost("/api/login", async (
+    LoginRequest request,
+    ChatDbContext db,
+    IPasswordHasher<User> passwordHasher,
+    JwtService jwtService) =>
+{
+    // Hämta användaren
+    var user = await db.Users
+        .FirstOrDefaultAsync(u => u.Username == request.Username);
+
+    if (user is null)
+        return Results.BadRequest("Fel användarnamn eller lösenord.");
+
+    // Verifiera lösenord
+    var result = passwordHasher.VerifyHashedPassword(
+        user,
+        user.PasswordHash,
+        request.Password);
+
+    if (result == PasswordVerificationResult.Failed)
+        return Results.BadRequest("Fel användarnamn eller lösenord.");
+
+    // Token skapas
+    var token = jwtService.GenerateToken(user.Username);
+
+    // Token returneras
+    return Results.Ok(new
+    {
+        token
+    });
+});
 
 
 // Serverar filer från wwwroot
