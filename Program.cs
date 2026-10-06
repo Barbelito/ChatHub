@@ -42,12 +42,12 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Aktiverar autentisering och anger att JWT ska vara standardmetoden
+// Aktiverar autentisering och anger JWT Bearer som standardmetod
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
-        // Regler för hur inkommande JWT-tokens ska valideras
+        // Regler för hur inkommande JWT-tokens ska verifieras
         options.TokenValidationParameters =
             new TokenValidationParameters
             {
@@ -55,23 +55,48 @@ builder.Services
                 ValidateAudience = true,
                 ValidateLifetime = true,
 
-                // Kontrollera att signaturen är korrekt (dvs rätt hemlig nyckel)
+                // Kontrollerar att token har signerats med rätt hemliga nyckel
                 ValidateIssuerSigningKey = true,
 
-                // Ingen extra giltighetstid efter att token gått ut
+                // Token blir ogiltig direkt när giltighetstiden går ut
                 ClockSkew = TimeSpan.Zero,
 
-                // Värden hämtas från User Secrets
+                // Issuer och Audience hämtas från konfigurationen
                 ValidIssuer = builder.Configuration["Jwt:Issuer"],
                 ValidAudience = builder.Configuration["Jwt:Audience"],
 
-                // Skapar en symmetrisk nyckel från den hemliga JWT-nyckeln
+                // Den hemliga JWT-nyckeln hämtas från User Secrets
+                // och används för att verifiera token-signaturen
                 IssuerSigningKey =
                     new SymmetricSecurityKey(
                         Encoding.UTF8.GetBytes(
                             builder.Configuration["Jwt:Key"]!
                         ))
             };
+
+        // SignalR kan skicka JWT som "access_token" när en WebSocket-anslutning etableras
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                // Försöker läsa token från query string
+                var accessToken =
+                    context.Request.Query["access_token"];
+
+                // Hämtar vilken endpoint klienten försöker ansluta till
+                var path =
+                    context.HttpContext.Request.Path;
+
+                // Använd endast query-token för SignalR-hubben
+                if (!string.IsNullOrEmpty(accessToken) &&
+                    path.StartsWithSegments("/chatHub"))
+                {
+                    context.Token = accessToken;
+                }
+
+                return Task.CompletedTask;
+            }
+        };
     });
 
 // Aktiverar authorization (krav på roller, policies, [Authorize]-attribut)

@@ -19,6 +19,7 @@
 
   --success: #16a34a;
   --danger: #dc2626;
+  --warning: #d97706;
 
   --message-bg: #f3f4f6;
 
@@ -29,9 +30,9 @@
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
 }
 
-/* ------------------------------
+/* =========================
    Reset
------------------------------- */
+========================= */
 
 * {
   box-sizing: border-box;
@@ -75,9 +76,9 @@ input:disabled {
   opacity: 0.55;
 }
 
-/* ------------------------------
+/* =========================
    App layout
------------------------------- */
+========================= */
 
 .app {
   width: min(1200px, calc(100% - 32px));
@@ -86,37 +87,46 @@ input:disabled {
   margin: 24px auto;
 
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 280px 1fr;
 
   overflow: hidden;
 
   background: var(--panel);
+
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
 
   box-shadow: var(--shadow);
 }
 
-/* ------------------------------
+/* =========================
    Sidebar
------------------------------- */
+========================= */
 
 .sidebar {
+  min-height: 0;
+
   display: flex;
   flex-direction: column;
 
-  padding: 24px 18px;
+  padding: 22px 18px;
+
+  overflow-y: auto;
 
   background: var(--sidebar);
   color: var(--text-light);
 }
+
+/* =========================
+   Brand
+========================= */
 
 .brand {
   display: flex;
   align-items: center;
   gap: 12px;
 
-  padding: 0 4px 24px;
+  padding: 0 4px 22px;
 }
 
 .brand__logo {
@@ -137,21 +147,23 @@ input:disabled {
   font-weight: 700;
 }
 
-.brand h1 {
+.brand__text h1 {
   margin: 0;
+
   font-size: 19px;
 }
 
-.brand p {
+.brand__text p {
   margin: 2px 0 0;
 
   color: var(--muted-light);
+
   font-size: 12px;
 }
 
-/* ------------------------------
+/* =========================
    Sidebar sections
------------------------------- */
+========================= */
 
 .sidebar__section {
   padding: 18px 4px;
@@ -159,8 +171,23 @@ input:disabled {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.sidebar__section h2 {
-  margin: 0 0 10px;
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  margin-bottom: 10px;
+}
+
+.section-heading h2 {
+  margin: 0;
+
+  font-size: 16px;
+}
+
+.section-label {
+  display: block;
 
   color: var(--muted-light);
 
@@ -171,41 +198,44 @@ input:disabled {
   letter-spacing: 0.08em;
 }
 
-.section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
+/* =========================
+   Authentication
+========================= */
 
-/* ------------------------------
-   Inputs
------------------------------- */
-
-label {
-  display: block;
-
-  margin-bottom: 6px;
+.auth-panel__description {
+  margin: 0 0 14px;
 
   color: var(--muted-light);
+
   font-size: 12px;
 }
 
-.input-group {
+.auth-form {
   display: grid;
-  gap: 8px;
+  gap: 12px;
 }
 
-input {
+.form-field {
+  display: grid;
+  gap: 5px;
+}
+
+.form-field label {
+  color: var(--muted-light);
+
+  font-size: 12px;
+}
+
+.form-field input {
   width: 100%;
   min-width: 0;
 
-  padding: 10px 12px;
+  padding: 10px 11px;
 
-  background: #ffffff;
-
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
 
+  background: #ffffff;
   color: var(--text);
 
   outline: none;
@@ -215,53 +245,207 @@ input {
     box-shadow 0.15s ease;
 }
 
-input:focus {
+.form-field input:focus {
   border-color: var(--accent);
 
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
-/* ------------------------------
-   Buttons
------------------------------- */
+.auth-message {
+  margin: 10px 0 0;
 
-button {
+  padding: 8px 10px;
+
+  border-radius: var(--radius-sm);
+
+  background: rgba(255, 255, 255, 0.06);
+
+  color: var(--muted-light);
+
+  font-size: 12px;
+}
+
+.auth-message--error {
+  background: rgba(220, 38, 38, 0.15);
+
+  color: #fecaca;
+}
+
+.auth-message--success {
+  background: rgba(22, 163, 74, 0.15);
+
+  color: #bbf7d0;
+}
+
+/* =========================
+   Buttons
+========================= */
+
+.button {
   border: 0;
   border-radius: var(--radius-sm);
 
+  padding: 10px 14px;
+
+  font-weight: 600;
+
   transition:
     background-color 0.15s ease,
-    transform 0.1s ease;
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.1s ease,
+    box-shadow 0.15s ease;
 }
 
-button:not(:disabled):active {
+.button:not(:disabled):active {
   transform: translateY(1px);
 }
 
-#connect-button {
-  padding: 9px 12px;
+.button--primary {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.button--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.button--secondary {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-light);
+
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.button--secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.button--send {
+  min-width: 90px;
+
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.button--send:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.button--dark {
+  background: #f3f4f6;
+  color: var(--text);
+
+  border: 1px solid var(--border);
+}
+
+.button--dark:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
+/* =========================
+   Login och registrering
+========================= */
+
+#login-button,
+#register-button {
+  width: 100%;
+  min-height: 42px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 8px;
+
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Logga in - primär knapp */
+
+#login-button {
+  margin-top: 4px;
 
   background: var(--accent);
   color: #ffffff;
 
-  font-weight: 600;
+  border: 1px solid var(--accent);
+
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.2);
 }
 
-#connect-button:hover:not(:disabled) {
+#login-button:hover:not(:disabled) {
   background: var(--accent-hover);
+  border-color: var(--accent-hover);
+
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
 }
+
+#login-button:active:not(:disabled) {
+  transform: translateY(1px);
+
+  box-shadow: none;
+}
+
+/* Skapa konto - sekundär knapp */
+
+#register-button {
+  background: transparent;
+  color: #dbeafe;
+
+  border: 1px solid rgba(147, 197, 253, 0.35);
+
+  box-shadow: none;
+}
+
+#register-button:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.12);
+
+  border-color: rgba(147, 197, 253, 0.65);
+
+  color: #ffffff;
+}
+
+#register-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Inaktiverade auth-knappar */
+
+#login-button:disabled,
+#register-button:disabled {
+  opacity: 0.55;
+
+  cursor: not-allowed;
+
+  box-shadow: none;
+}
+
+/* =========================
+   Icon buttons
+========================= */
 
 .icon-button {
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
 
   display: grid;
   place-items: center;
+
+  flex-shrink: 0;
+
+  border: 0;
+  border-radius: var(--radius-sm);
 
   background: transparent;
   color: var(--muted-light);
 
   font-size: 20px;
+
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .icon-button:hover:not(:disabled) {
@@ -269,25 +453,35 @@ button:not(:disabled):active {
   color: #ffffff;
 }
 
-/* ------------------------------
-   User
------------------------------- */
+.icon-button--dark {
+  color: var(--muted);
+}
 
-.user-panel {
+.icon-button--dark:hover:not(:disabled) {
+  background: var(--message-bg);
+  color: var(--text);
+}
+
+/* =========================
+   User panel
+========================= */
+
+.user-card {
   display: flex;
   align-items: center;
   gap: 10px;
 
-  padding: 8px;
-
-  background: rgba(255, 255, 255, 0.06);
+  margin-top: 9px;
+  padding: 9px;
 
   border-radius: var(--radius-md);
+
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .avatar {
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
 
   display: grid;
   place-items: center;
@@ -298,26 +492,52 @@ button:not(:disabled):active {
 
   background: var(--accent);
 
+  color: #ffffff;
+
   font-weight: 700;
 }
 
-.user-panel strong {
+.user-card__info {
+  min-width: 0;
+
+  flex: 1;
+}
+
+.user-card__info strong {
   display: block;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+
   font-size: 14px;
 }
 
-.user-panel__label {
-  display: block;
+.user-card__status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
 
-  margin-top: 1px;
+  margin-top: 2px;
 
   color: var(--muted-light);
+
   font-size: 11px;
 }
 
-/* ------------------------------
+.online-dot {
+  width: 7px;
+  height: 7px;
+
+  border-radius: 50%;
+
+  background: var(--success);
+}
+
+/* =========================
    Rooms
------------------------------- */
+========================= */
 
 .rooms {
   display: grid;
@@ -333,13 +553,20 @@ button:not(:disabled):active {
 
   padding: 9px 10px;
 
+  border: 0;
+  border-radius: var(--radius-sm);
+
   background: transparent;
   color: var(--muted-light);
 
   text-align: left;
+
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
 }
 
-.room:hover {
+.room:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   color: #ffffff;
 }
@@ -349,9 +576,36 @@ button:not(:disabled):active {
   color: #ffffff;
 }
 
-/* ------------------------------
-   Security
------------------------------- */
+.room__icon {
+  width: 18px;
+
+  flex-shrink: 0;
+
+  color: inherit;
+
+  text-align: center;
+}
+
+.room__name {
+  min-width: 0;
+
+  overflow: hidden;
+
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rooms__empty {
+  margin: 4px 0 0;
+
+  color: var(--muted-light);
+
+  font-size: 11px;
+}
+
+/* =========================
+   Security info
+========================= */
 
 .security-info {
   display: flex;
@@ -382,12 +636,13 @@ button:not(:disabled):active {
   margin-top: 2px;
 
   color: var(--muted-light);
+
   font-size: 10px;
 }
 
-/* ------------------------------
-   Chat
------------------------------- */
+/* =========================
+   Chat layout
+========================= */
 
 .chat {
   min-width: 0;
@@ -399,12 +654,12 @@ button:not(:disabled):active {
   background: var(--panel);
 }
 
-/* ------------------------------
+/* =========================
    Chat header
------------------------------- */
+========================= */
 
 .chat__header {
-  min-height: 78px;
+  min-height: 84px;
 
   display: flex;
   align-items: center;
@@ -416,7 +671,13 @@ button:not(:disabled):active {
   border-bottom: 1px solid var(--border);
 }
 
+.chat__room-info {
+  min-width: 0;
+}
+
 .chat__eyebrow {
+  display: block;
+
   color: var(--muted);
 
   font-size: 11px;
@@ -432,9 +693,25 @@ button:not(:disabled):active {
   font-size: 18px;
 }
 
-/* ------------------------------
+.chat__room-description {
+  display: block;
+
+  margin-top: 2px;
+
+  color: var(--muted);
+
+  font-size: 12px;
+}
+
+.chat__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* =========================
    Connection status
------------------------------- */
+========================= */
 
 .status {
   display: flex;
@@ -468,34 +745,41 @@ button:not(:disabled):active {
   color: var(--danger);
 }
 
-/* ------------------------------
+.status--connecting {
+  background: #fff7ed;
+  color: var(--warning);
+}
+
+/* =========================
    Messages area
------------------------------- */
+========================= */
 
 .messages-wrapper {
   min-height: 0;
+  height: 100%;
 
   position: relative;
 
   overflow-y: auto;
+  overflow-x: hidden;
 
   padding: 24px;
 }
 
 .messages {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
   list-style: none;
 
   margin: 0;
   padding: 0;
-
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
 }
 
-/* ------------------------------
-   Individual messages
------------------------------- */
+/* =========================
+   Message
+========================= */
 
 .message {
   max-width: 75%;
@@ -518,6 +802,7 @@ button:not(:disabled):active {
 
 .message__time {
   color: var(--muted);
+
   font-size: 10px;
 }
 
@@ -529,6 +814,7 @@ button:not(:disabled):active {
   border-radius: 4px var(--radius-md) var(--radius-md) var(--radius-md);
 
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message--own {
@@ -546,18 +832,17 @@ button:not(:disabled):active {
   border-radius: var(--radius-md) 4px var(--radius-md) var(--radius-md);
 }
 
-/* ------------------------------
-   System messages
------------------------------- */
-
 .message--system {
   max-width: 100%;
 
   align-self: center;
 
   color: var(--muted);
+
   font-size: 12px;
   font-style: italic;
+
+  text-align: center;
 }
 
 .message--error {
@@ -566,12 +851,13 @@ button:not(:disabled):active {
   align-self: center;
 
   color: var(--danger);
+
   font-size: 12px;
 }
 
-/* ------------------------------
+/* =========================
    Empty state
------------------------------- */
+========================= */
 
 .empty-state {
   height: 100%;
@@ -589,27 +875,28 @@ button:not(:disabled):active {
 .empty-state__icon {
   margin-bottom: 10px;
 
-  font-size: 32px;
+  font-size: 34px;
 }
 
 .empty-state h3 {
   margin: 0;
 
   color: var(--text);
-  font-size: 16px;
+
+  font-size: 17px;
 }
 
 .empty-state p {
-  max-width: 300px;
+  max-width: 320px;
 
   margin: 5px 0 0;
 
   font-size: 13px;
 }
 
-/* ------------------------------
-   Message form
------------------------------- */
+/* =========================
+   Chat footer
+========================= */
 
 .chat__footer {
   padding: 16px 24px;
@@ -623,39 +910,195 @@ button:not(:disabled):active {
   gap: 10px;
 }
 
-.send-form input {
-  padding: 11px 13px;
+.message-input-wrapper {
+  position: relative;
+
+  min-width: 0;
 }
 
-.send-form button {
-  min-width: 90px;
+.message-input-wrapper input {
+  width: 100%;
 
-  padding: 10px 18px;
+  padding: 11px 78px 11px 13px;
 
-  background: var(--accent);
-  color: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
 
-  font-weight: 600;
+  background: #ffffff;
+  color: var(--text);
+
+  outline: none;
+
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 
-.send-form button:hover:not(:disabled) {
-  background: var(--accent-hover);
+.message-input-wrapper input:focus {
+  border-color: var(--accent);
+
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.character-count {
+  position: absolute;
+
+  top: 50%;
+  right: 11px;
+
+  transform: translateY(-50%);
+
+  color: var(--muted);
+
+  font-size: 10px;
+
+  pointer-events: none;
 }
 
 .chat__footer-info {
   display: flex;
+  align-items: center;
   justify-content: space-between;
 
-  margin-top: 6px;
+  margin-top: 7px;
 
   color: var(--muted);
 
   font-size: 10px;
 }
 
-/* ------------------------------
+/* =========================
+   Modal
+========================= */
+
+.modal {
+  position: fixed;
+
+  inset: 0;
+
+  z-index: 1000;
+
+  display: grid;
+  place-items: center;
+
+  padding: 16px;
+}
+
+.modal__backdrop {
+  position: absolute;
+
+  inset: 0;
+
+  background: rgba(17, 24, 39, 0.58);
+}
+
+.modal__content {
+  position: relative;
+
+  z-index: 1;
+
+  width: min(440px, 100%);
+
+  padding: 20px;
+
+  background: var(--panel);
+
+  border-radius: var(--radius-lg);
+
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.22);
+}
+
+.modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+
+  margin-bottom: 18px;
+}
+
+.modal__header h2 {
+  margin: 2px 0 0;
+
+  font-size: 19px;
+}
+
+.modal .form-field label {
+  color: var(--muted);
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  margin-top: 14px;
+
+  cursor: pointer;
+}
+
+.checkbox-field input {
+  width: auto;
+}
+
+.form-help {
+  margin: 7px 0 0;
+
+  color: var(--muted);
+
+  font-size: 11px;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+
+  margin-top: 20px;
+}
+
+/* =========================
+   Notifications
+========================= */
+
+.notification-container {
+  position: fixed;
+
+  top: 20px;
+  right: 20px;
+
+  z-index: 2000;
+
+  width: min(360px, calc(100% - 40px));
+
+  display: grid;
+  gap: 8px;
+}
+
+.notification {
+  padding: 11px 13px;
+
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+
+  background: var(--panel);
+
+  box-shadow: var(--shadow);
+
+  font-size: 13px;
+}
+
+.notification--success {
+  border-color: rgba(22, 163, 74, 0.3);
+}
+
+.notification--error {
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+/* =========================
    Utility
------------------------------- */
+========================= */
 
 .hidden {
   display: none !important;
@@ -673,14 +1116,21 @@ button:not(:disabled):active {
   overflow: hidden;
 
   clip: rect(0, 0, 0, 0);
+
   white-space: nowrap;
 
   border: 0;
 }
 
-/* ------------------------------
+/* =========================
    Responsive
------------------------------- */
+========================= */
+
+@media (max-width: 900px) {
+  .app {
+    grid-template-columns: 240px 1fr;
+  }
+}
 
 @media (max-width: 760px) {
   body {
@@ -707,6 +1157,10 @@ button:not(:disabled):active {
     padding: 14px 16px;
   }
 
+  .chat__room-description {
+    display: none;
+  }
+
   .messages-wrapper {
     padding: 16px;
   }
@@ -717,5 +1171,27 @@ button:not(:disabled):active {
 
   .message {
     max-width: 88%;
+  }
+}
+
+@media (max-width: 520px) {
+  .chat__header {
+    align-items: flex-start;
+
+    flex-direction: column;
+  }
+
+  .send-form {
+    grid-template-columns: 1fr;
+  }
+
+  .button--send {
+    width: 100%;
+  }
+
+  .chat__footer-info {
+    gap: 12px;
+
+    flex-wrap: wrap;
   }
 }
