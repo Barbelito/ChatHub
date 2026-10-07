@@ -194,6 +194,118 @@ public class ChatMessageHub : Hub
         }
     }
 
+
+// =========================
+// Bjud in användare till privat rum
+// =========================
+
+public async Task InviteUserToRoom(
+    int roomId,
+    string invitedUsername)
+{
+    var currentUserId = GetCurrentUserId();
+
+    invitedUsername = invitedUsername.Trim();
+
+    if (string.IsNullOrWhiteSpace(invitedUsername))
+    {
+        throw new HubException(
+            "Användarnamn krävs."
+        );
+    }
+
+    // Hämta rummet och dess medlemmar
+    var room = await _db.ChatRooms
+        .Include(room => room.Members)
+        .FirstOrDefaultAsync(
+            room => room.Id == roomId
+        );
+
+    if (room is null)
+    {
+        throw new HubException(
+            "Rummet kunde inte hittas."
+        );
+    }
+
+    // Inbjudningar används endast för privata rum
+    if (!room.IsPrivate)
+    {
+        throw new HubException(
+            "Endast privata rum kräver inbjudningar."
+        );
+    }
+
+    /*
+        Endast den som skapade rummet
+        får bjuda in andra användare.
+    */
+    if (room.CreatedByUserId != currentUserId)
+    {
+        throw new HubException(
+            "Endast rummets ägare får bjuda in användare."
+        );
+    }
+
+    // Hitta användaren i databasen
+    var invitedUser = await _db.Users
+        .FirstOrDefaultAsync(
+            user =>
+                user.Username.ToLower() ==
+                invitedUsername.ToLower()
+        );
+
+    if (invitedUser is null)
+    {
+        throw new HubException(
+            "Användaren kunde inte hittas."
+        );
+    }
+
+    // Kontrollera om användaren redan är medlem
+    var alreadyMember = room.Members
+        .Any(member =>
+            member.UserId == invitedUser.Id);
+
+    if (alreadyMember)
+    {
+        throw new HubException(
+            "Användaren är redan medlem i rummet."
+        );
+    }
+
+    // Lägg till användaren som medlem
+    _db.ChatRoomMembers.Add(
+        new ChatRoomMember
+        {
+            ChatRoomId = room.Id,
+            UserId = invitedUser.Id
+        }
+    );
+
+    await _db.SaveChangesAsync();
+
+    /*
+        Om användaren är online skickas
+        en SignalR-notifiering direkt.
+
+        SignalR använder NameIdentifier från JWT
+        för att identifiera användaren.
+    */
+    await Clients
+        .User(invitedUser.Id.ToString())
+        .SendAsync(
+            "ReceiveRoomInvitation",
+            new RoomDto
+            {
+                Id = room.Id,
+                Name = room.Name,
+                IsPrivate = room.IsPrivate,
+                IsOwner = false
+            }
+        );
+    }
+
     // Lämna ett SignalR-rum
 
     public async Task LeaveRoom(int roomId)
