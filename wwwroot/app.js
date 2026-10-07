@@ -1,9 +1,8 @@
 // =========================
-// Hämta element från HTML
+// HTML-element
 // =========================
 
-// Hämtar ett obligatoriskt element och ger ett tydligt fel
-// om HTML och JavaScript inte matchar
+// Hämtar ett obligatoriskt element från HTML
 function getRequiredElement(id) {
   const element = document.getElementById(id);
 
@@ -34,6 +33,8 @@ const logoutButton = getRequiredElement("logout-button");
 
 // Chattrum
 const roomList = getRequiredElement("room-list");
+const privateRoomList = getRequiredElement("private-room-list");
+
 const createRoomButton = getRequiredElement("create-room-button");
 
 const roomName = getRequiredElement("room-name");
@@ -45,23 +46,29 @@ const statusText = getRequiredElement("status-text");
 
 // Meddelanden
 const emptyState = getRequiredElement("empty-state");
-const messages = getRequiredElement("messages");
-const messagesWrapper = document.querySelector(".messages-wrapper");
 
-const sendForm = getRequiredElement("send-form");
-const messageInput = getRequiredElement("message");
-const sendButton = getRequiredElement("send-button");
-const characterCount = getRequiredElement("character-count");
+const messages = getRequiredElement("messages");
+
+const messagesWrapper = document.querySelector(".messages-wrapper");
 
 if (!messagesWrapper) {
   throw new Error('Saknar HTML-element med class="messages-wrapper".');
 }
 
+const sendForm = getRequiredElement("send-form");
+
+const messageInput = getRequiredElement("message");
+const sendButton = getRequiredElement("send-button");
+
+const characterCount = getRequiredElement("character-count");
+
 // Rum-modal
 const roomModal = getRequiredElement("room-modal");
+
 const createRoomForm = getRequiredElement("create-room-form");
 
 const newRoomNameInput = getRequiredElement("new-room-name");
+
 const privateRoomCheckbox = getRequiredElement("private-room-checkbox");
 
 const closeRoomModalButton = getRequiredElement("close-room-modal-button");
@@ -71,21 +78,30 @@ const cancelRoomButton = getRequiredElement("cancel-room-button");
 // Notifieringar
 const notificationContainer = getRequiredElement("notification-container");
 
+// General-rummet
+const generalRoomButton = roomList.querySelector('[data-room="general"]');
+
 // =========================
-// Applikationens state
+// State
 // =========================
 
-// Den inloggade användarens namn
+// Inloggad användare
 let username = "";
 
-// JWT hålls endast i minnet och skrivs inte till localStorage
+// JWT sparas endast i minnet
 let accessToken = null;
+
+// null betyder General
+let selectedRoomId = null;
+
+// Rum som användaren får se
+let availableRooms = [];
 
 // =========================
 // SignalR
 // =========================
 
-// SignalR hämtar aktuell JWT när anslutningen autentiseras
+// Skapar SignalR-anslutningen med JWT
 const connection = new signalR.HubConnectionBuilder()
   .withUrl("/chatHub", {
     accessTokenFactory: () => accessToken ?? "",
@@ -94,18 +110,52 @@ const connection = new signalR.HubConnectionBuilder()
   .build();
 
 // =========================
-// SignalR - meddelanden
+// Globala meddelanden
 // =========================
 
-// Tar emot vanliga chatmeddelanden från servern
+// Tar emot meddelanden från General
 connection.on("ReceiveMessage", (sender, message) => {
+  // Visa bara General-meddelanden i General
+  if (selectedRoomId !== null) {
+    return;
+  }
+
   const ownMessage = sender === username;
 
   addMessage(sender, message, ownMessage);
 });
 
-// Tar emot systemmeddelanden från servern
+// Tar emot systemmeddelanden från General
 connection.on("ReceiveSystemMessage", (message) => {
+  if (selectedRoomId !== null) {
+    return;
+  }
+
+  addSystemMessage(message);
+});
+
+// =========================
+// Rumsmeddelanden
+// =========================
+
+// Tar emot meddelanden från ett chattrum
+connection.on("ReceiveRoomMessage", (roomId, sender, message) => {
+  // Visa bara meddelanden från aktivt rum
+  if (roomId !== selectedRoomId) {
+    return;
+  }
+
+  const ownMessage = sender === username;
+
+  addMessage(sender, message, ownMessage);
+});
+
+// Tar emot systemmeddelanden från ett rum
+connection.on("ReceiveRoomSystemMessage", (roomId, message) => {
+  if (roomId !== selectedRoomId) {
+    return;
+  }
+
   addSystemMessage(message);
 });
 
@@ -113,15 +163,15 @@ connection.on("ReceiveSystemMessage", (message) => {
 // Authentication events
 // =========================
 
-// Login när formuläret skickas.
-// preventDefault stoppar webbläsaren från att refresha sidan.
+// Logga in när formuläret skickas
 authForm.addEventListener("submit", async (event) => {
+  // Stoppar sidan från att laddas om
   event.preventDefault();
 
   await login();
 });
 
-// Registrera nytt konto
+// Skapa konto
 registerButton.addEventListener("click", async () => {
   await register();
 });
@@ -137,11 +187,12 @@ logoutButton.addEventListener("click", async () => {
 
 async function register() {
   const enteredUsername = usernameInput.value.trim();
+
   const password = passwordInput.value;
 
   clearAuthMessage();
 
-  // Grundläggande validering i klienten
+  // Enkel validering
   if (!enteredUsername || !password) {
     showAuthMessage("Användarnamn och lösenord krävs.", "error");
 
@@ -180,7 +231,6 @@ async function register() {
       "success",
     );
 
-    // Rensa endast lösenordet efter registrering
     passwordInput.value = "";
     passwordInput.focus();
   } catch (error) {
@@ -193,15 +243,17 @@ async function register() {
 }
 
 // =========================
-// Inloggning
+// Login
 // =========================
 
 async function login() {
   const enteredUsername = usernameInput.value.trim();
+
   const password = passwordInput.value;
 
   clearAuthMessage();
 
+  // Enkel validering
   if (!enteredUsername || !password) {
     showAuthMessage("Användarnamn och lösenord krävs.", "error");
 
@@ -237,7 +289,7 @@ async function login() {
 
     const data = await response.json();
 
-    // Kontrollera att servern faktiskt returnerade en JWT
+    // Kontrollera att JWT finns
     if (!data.token) {
       showAuthMessage("Servern returnerade ingen token.", "error");
 
@@ -247,15 +299,20 @@ async function login() {
     // JWT sparas endast i minnet
     accessToken = data.token;
 
-    // Namnet används bara i UI.
-    // Servern hämtar identiteten från den verifierade JWT-token.
+    // Namnet används endast för UI
     username = enteredUsername;
 
-    // Starta den autentiserade SignalR-anslutningen
+    // Starta SignalR med JWT
     await connectSignalR();
 
-    // Uppdatera UI först när login och SignalR har lyckats
+    // Visa inloggat UI
     showLoggedInUser();
+
+    // Hämta användarens rum
+    await loadRooms();
+
+    // Börja alltid i General
+    await selectGeneralRoom();
 
     passwordInput.value = "";
 
@@ -263,7 +320,6 @@ async function login() {
   } catch (error) {
     console.error("Login error:", error);
 
-    // Rensa autentiseringsdata om login eller SignalR misslyckas
     accessToken = null;
     username = "";
 
@@ -274,12 +330,12 @@ async function login() {
 }
 
 // =========================
-// Logga ut
+// Logout
 // =========================
 
 async function logout() {
   try {
-    // Stoppa SignalR innan JWT tas bort
+    // Stoppa SignalR
     if (connection.state !== signalR.HubConnectionState.Disconnected) {
       await connection.stop();
     }
@@ -287,12 +343,19 @@ async function logout() {
     console.error("Logout error:", error);
   }
 
-  // Ta bort autentiseringsinformation
+  // Rensa autentisering
   accessToken = null;
   username = "";
 
-  // Rensa chatten
+  // Rensa rum
+  selectedRoomId = null;
+  availableRooms = [];
+
+  // Rensa meddelanden
   messages.replaceChildren();
+
+  // Rensa dynamiska rum
+  clearDynamicRooms();
 
   // Återställ UI
   showLoggedOutUser();
@@ -301,7 +364,7 @@ async function logout() {
 }
 
 // =========================
-// SignalR - anslutning
+// SignalR-anslutning
 // =========================
 
 async function connectSignalR() {
@@ -309,7 +372,7 @@ async function connectSignalR() {
     throw new Error("JWT saknas.");
   }
 
-  // Undvik att starta en anslutning som redan är aktiv
+  // Starta inte en redan aktiv anslutning
   if (connection.state === signalR.HubConnectionState.Connected) {
     return;
   }
@@ -322,9 +385,10 @@ async function connectSignalR() {
 }
 
 // =========================
-// SignalR - anslutningsstatus
+// SignalR-status
 // =========================
 
+// Körs när SignalR försöker återansluta
 connection.onreconnecting(() => {
   setConnectionStatus("Återansluter...", "connecting");
 
@@ -332,15 +396,33 @@ connection.onreconnecting(() => {
   sendButton.disabled = true;
 });
 
-connection.onreconnected(() => {
+// Körs när SignalR har återanslutit
+connection.onreconnected(async () => {
   setConnectionStatus("Ansluten", "online");
 
   messageInput.disabled = false;
   sendButton.disabled = false;
 
+  /*
+      SignalR-grupper är kopplade till anslutningen.
+      Därför går vi med i rummet igen efter reconnect.
+    */
+  if (selectedRoomId !== null) {
+    try {
+      await connection.invoke("JoinRoom", selectedRoomId);
+    } catch (error) {
+      console.error("Rejoin room error:", error);
+
+      await selectGeneralRoom();
+    }
+  }
+
+  await loadRooms();
+
   showNotification("Anslutningen återställdes.", "success");
 });
 
+// Körs när SignalR kopplas bort
 connection.onclose(() => {
   setConnectionStatus("Ej ansluten", "offline");
 
@@ -368,12 +450,15 @@ sendForm.addEventListener("submit", async (event) => {
   }
 
   try {
-    /*
-      Endast själva meddelandet skickas från klienten.
-      Användarnamnet hämtas av servern från den
-      verifierade JWT-token.
-    */
-    await connection.invoke("SendMessage", text);
+    // General använder den globala chatten
+    if (selectedRoomId === null) {
+      await connection.invoke("SendMessage", text);
+    }
+
+    // Rum använder SignalR-grupper
+    else {
+      await connection.invoke("SendRoomMessage", selectedRoomId, text);
+    }
 
     messageInput.value = "";
 
@@ -381,9 +466,12 @@ sendForm.addEventListener("submit", async (event) => {
 
     messageInput.focus();
   } catch (error) {
-    console.error("SendMessage error:", error);
+    console.error("Send message error:", error);
 
-    showNotification("Meddelandet kunde inte skickas.", "error");
+    showNotification(
+      getSignalRErrorMessage(error, "Meddelandet kunde inte skickas."),
+      "error",
+    );
   }
 });
 
@@ -391,16 +479,14 @@ sendForm.addEventListener("submit", async (event) => {
 // Teckenräknare
 // =========================
 
-messageInput.addEventListener("input", () => {
-  updateCharacterCount();
-});
+messageInput.addEventListener("input", updateCharacterCount);
 
 function updateCharacterCount() {
   characterCount.textContent = `${messageInput.value.length} / 500`;
 }
 
 // =========================
-// Lägg till chatmeddelande
+// Visa meddelande
 // =========================
 
 function addMessage(sender, text, ownMessage) {
@@ -416,11 +502,7 @@ function addMessage(sender, text, ownMessage) {
 
   usernameElement.className = "message__username";
 
-  /*
-    textContent används istället för innerHTML.
-    Det förhindrar att användarinput renderas
-    som HTML eller JavaScript.
-  */
+  // textContent skyddar mot HTML i användarinput
   usernameElement.textContent = sender;
 
   const timeElement = document.createElement("span");
@@ -438,7 +520,7 @@ function addMessage(sender, text, ownMessage) {
 
   content.className = "message__content";
 
-  // Rendera meddelandet som ren text
+  // Meddelandet visas som ren text
   content.textContent = text;
 
   li.append(header, content);
@@ -449,7 +531,7 @@ function addMessage(sender, text, ownMessage) {
 }
 
 // =========================
-// Systemmeddelanden
+// Systemmeddelande
 // =========================
 
 function addSystemMessage(text) {
@@ -480,6 +562,7 @@ function scrollToBottom() {
 
 function showLoggedInUser() {
   authPanel.classList.add("hidden");
+
   userPanel.classList.remove("hidden");
 
   currentUser.textContent = username;
@@ -489,18 +572,17 @@ function showLoggedInUser() {
   emptyState.classList.add("hidden");
 
   messageInput.disabled = false;
+
   sendButton.disabled = false;
 
   messageInput.placeholder = "Skriv ett meddelande...";
 
   createRoomButton.disabled = false;
 
-  // Aktivera standardrummet
-  const roomButtons = roomList.querySelectorAll(".room");
-
-  roomButtons.forEach((button) => {
-    button.disabled = false;
-  });
+  // Aktivera General
+  if (generalRoomButton) {
+    generalRoomButton.disabled = false;
+  }
 
   messageInput.focus();
 }
@@ -511,15 +593,18 @@ function showLoggedInUser() {
 
 function showLoggedOutUser() {
   authPanel.classList.remove("hidden");
+
   userPanel.classList.add("hidden");
 
   currentUser.textContent = "Okänd";
+
   userAvatar.textContent = "?";
 
   usernameInput.value = "";
   passwordInput.value = "";
 
   messageInput.value = "";
+
   messageInput.disabled = true;
 
   sendButton.disabled = true;
@@ -528,12 +613,15 @@ function showLoggedOutUser() {
 
   createRoomButton.disabled = true;
 
-  // Inaktivera rum
-  const roomButtons = roomList.querySelectorAll(".room");
+  if (generalRoomButton) {
+    generalRoomButton.disabled = true;
 
-  roomButtons.forEach((button) => {
-    button.disabled = true;
-  });
+    generalRoomButton.classList.add("room--active");
+  }
+
+  roomName.textContent = "General";
+
+  roomDescription.textContent = "Global chatt för alla användare.";
 
   emptyState.classList.remove("hidden");
 
@@ -550,9 +638,11 @@ function showLoggedOutUser() {
 
 function setAuthLoading(loading, action = "") {
   loginButton.disabled = loading;
+
   registerButton.disabled = loading;
 
   usernameInput.disabled = loading;
+
   passwordInput.disabled = loading;
 
   if (!loading) {
@@ -619,22 +709,211 @@ function setConnectionStatus(text, state) {
 }
 
 // =========================
-// Chattrum
+// General
 // =========================
 
-// Öppna modal för nytt rum
+// Öppna General
+if (generalRoomButton) {
+  generalRoomButton.addEventListener("click", async () => {
+    await selectGeneralRoom();
+  });
+}
+
+async function selectGeneralRoom() {
+  try {
+    // Lämna tidigare rum
+    if (selectedRoomId !== null) {
+      await connection.invoke("LeaveRoom", selectedRoomId);
+    }
+
+    selectedRoomId = null;
+
+    // Rensa gamla meddelanden
+    messages.replaceChildren();
+
+    roomName.textContent = "General";
+
+    roomDescription.textContent = "Global chatt för alla användare.";
+
+    setActiveRoomButton(null);
+
+    messageInput.focus();
+  } catch (error) {
+    console.error("Select General error:", error);
+  }
+}
+
+// =========================
+// Hämta rum
+// =========================
+
+async function loadRooms() {
+  try {
+    // Servern bestämmer vilka rum användaren får se
+    availableRooms = await connection.invoke("GetAvailableRooms");
+
+    renderRooms();
+  } catch (error) {
+    console.error("GetAvailableRooms error:", error);
+
+    showNotification("Kunde inte hämta chattrummen.", "error");
+  }
+}
+
+// =========================
+// Visa rum
+// =========================
+
+function renderRooms() {
+  // Ta bort tidigare dynamiska rum
+  clearDynamicRooms();
+
+  for (const room of availableRooms) {
+    const button = createRoomButtonElement(room);
+
+    if (room.isPrivate) {
+      privateRoomList.appendChild(button);
+    } else {
+      roomList.appendChild(button);
+    }
+  }
+}
+
+// Skapar en knapp för ett rum
+function createRoomButtonElement(room) {
+  const button = document.createElement("button");
+
+  button.type = "button";
+
+  button.className = "room room--dynamic";
+
+  button.dataset.roomId = room.id.toString();
+
+  const name = document.createElement("span");
+
+  // textContent skyddar mot HTML i rumsnamnet
+  name.textContent = room.name;
+
+  button.appendChild(name);
+
+  // Visa markering för privata rum
+  if (room.isPrivate) {
+    const badge = document.createElement("span");
+
+    badge.textContent = "Privat";
+
+    badge.className = "room__badge";
+
+    button.appendChild(badge);
+  }
+
+  button.addEventListener("click", async () => {
+    await selectRoom(room);
+  });
+
+  return button;
+}
+
+// Tar bort dynamiska rum från UI
+function clearDynamicRooms() {
+  const publicRooms = roomList.querySelectorAll(".room--dynamic");
+
+  publicRooms.forEach((button) => button.remove());
+
+  privateRoomList.replaceChildren();
+}
+
+// =========================
+// Byta rum
+// =========================
+
+async function selectRoom(room) {
+  try {
+    // Gör inget om rummet redan är aktivt
+    if (selectedRoomId === room.id) {
+      return;
+    }
+
+    // Lämna tidigare rum
+    if (selectedRoomId !== null) {
+      await connection.invoke("LeaveRoom", selectedRoomId);
+    }
+
+    /*
+      Servern kontrollerar om användaren
+      har behörighet till rummet.
+    */
+    await connection.invoke("JoinRoom", room.id);
+
+    selectedRoomId = room.id;
+
+    // Rensa meddelanden från tidigare rum
+    messages.replaceChildren();
+
+    roomName.textContent = room.name;
+
+    roomDescription.textContent = room.isPrivate
+      ? "Privat chattrum"
+      : "Offentligt chattrum";
+
+    setActiveRoomButton(room.id);
+
+    messageInput.focus();
+  } catch (error) {
+    console.error("JoinRoom error:", error);
+
+    showNotification(
+      getSignalRErrorMessage(error, "Du kunde inte gå med i rummet."),
+      "error",
+    );
+  }
+}
+
+// =========================
+// Aktivt rum
+// =========================
+
+function setActiveRoomButton(roomId) {
+  const buttons = document.querySelectorAll(".room");
+
+  buttons.forEach((button) => {
+    button.classList.remove("room--active");
+  });
+
+  // null betyder General
+  if (roomId === null) {
+    if (generalRoomButton) {
+      generalRoomButton.classList.add("room--active");
+    }
+
+    return;
+  }
+
+  const activeButton = document.querySelector(`[data-room-id="${roomId}"]`);
+
+  if (activeButton) {
+    activeButton.classList.add("room--active");
+  }
+}
+
+// =========================
+// Öppna rum-modal
+// =========================
+
 createRoomButton.addEventListener("click", () => {
   roomModal.classList.remove("hidden");
 
   newRoomNameInput.focus();
 });
 
-// Stäng modal
+// =========================
+// Stäng rum-modal
+// =========================
+
 closeRoomModalButton.addEventListener("click", closeRoomModal);
 
 cancelRoomButton.addEventListener("click", closeRoomModal);
 
-// Stäng modal genom att klicka på bakgrunden
 const modalBackdrop = roomModal.querySelector(".modal__backdrop");
 
 if (modalBackdrop) {
@@ -651,30 +930,43 @@ function closeRoomModal() {
 // Skapa rum
 // =========================
 
-createRoomForm.addEventListener("submit", (event) => {
+createRoomForm.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  /*
-      Backend för rum är inte implementerad ännu.
-      Vi skapar därför inte ett falskt rum lokalt.
-    */
   const newRoomName = newRoomNameInput.value.trim();
 
   if (!newRoomName) {
+    showNotification("Du måste ange ett rumsnamn.", "error");
+
     return;
   }
 
-  const roomType = privateRoomCheckbox.checked ? "privat" : "offentligt";
+  const isPrivate = privateRoomCheckbox.checked;
 
-  const formattedRoomType =
-    roomType.charAt(0).toUpperCase() + roomType.slice(1);
+  try {
+    /*
+        UserId skickas inte från klienten.
+        Servern hämtar användaren från JWT.
+      */
+    const room = await connection.invoke("CreateRoom", newRoomName, isPrivate);
 
-  showNotification(
-    `${formattedRoomType} rum implementeras i nästa steg.`,
-    "success",
-  );
+    closeRoomModal();
 
-  closeRoomModal();
+    // Hämta rummen igen från databasen
+    await loadRooms();
+
+    // Öppna det nya rummet
+    await selectRoom(room);
+
+    showNotification(`Rummet "${room.name}" skapades.`, "success");
+  } catch (error) {
+    console.error("CreateRoom error:", error);
+
+    showNotification(
+      getSignalRErrorMessage(error, "Rummet kunde inte skapas."),
+      "error",
+    );
+  }
 });
 
 // =========================
@@ -690,17 +982,17 @@ function showNotification(message, type = "success") {
 
   notificationContainer.appendChild(notification);
 
-  // Ta bort notifieringen automatiskt
+  // Ta bort notifieringen efter en stund
   setTimeout(() => {
     notification.remove();
   }, 3500);
 }
 
 // =========================
-// HTTP helpers
+// HTTP helper
 // =========================
 
-// Läser både JSON och vanlig text från API-svar
+// Läser text eller JSON från API-svar
 async function readResponseMessage(response) {
   const contentType = response.headers.get("content-type") ?? "";
 
@@ -715,6 +1007,19 @@ async function readResponseMessage(response) {
   }
 
   return await response.text();
+}
+
+// =========================
+// SignalR error helper
+// =========================
+
+// Hämtar ett felmeddelande från SignalR
+function getSignalRErrorMessage(error, fallback) {
+  if (error && typeof error.message === "string") {
+    return error.message;
+  }
+
+  return fallback;
 }
 
 // =========================
