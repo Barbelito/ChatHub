@@ -75,6 +75,21 @@ const closeRoomModalButton = getRequiredElement("close-room-modal-button");
 
 const cancelRoomButton = getRequiredElement("cancel-room-button");
 
+// Inbjudningar
+const inviteUserButton = getRequiredElement("invite-user-button");
+
+const inviteModal = getRequiredElement("invite-modal");
+
+const inviteForm = getRequiredElement("invite-form");
+
+const inviteUsernameInput = getRequiredElement("invite-username");
+
+const closeInviteModalButton = getRequiredElement("close-invite-modal-button");
+
+const cancelInviteButton = getRequiredElement("cancel-invite-button");
+
+const sendInviteButton = getRequiredElement("send-invite-button");
+
 // Notifieringar
 const notificationContainer = getRequiredElement("notification-container");
 
@@ -157,6 +172,18 @@ connection.on("ReceiveRoomSystemMessage", (roomId, message) => {
   }
 
   addSystemMessage(message);
+});
+
+// =========================
+// Rumsinbjudningar
+// =========================
+
+// Tar emot en inbjudan till ett privat rum
+connection.on("ReceiveRoomInvitation", async (room) => {
+  // Läs om rummen från servern
+  await loadRooms();
+
+  showNotification(`Du har blivit inbjuden till "${room.name}".`, "success");
 });
 
 // =========================
@@ -357,6 +384,13 @@ async function logout() {
   // Rensa dynamiska rum
   clearDynamicRooms();
 
+  // Dölj inbjudningsknappen
+  inviteUserButton.classList.add("hidden");
+
+  // Stäng modaler
+  closeRoomModal();
+  closeInviteModal();
+
   // Återställ UI
   showLoggedOutUser();
 
@@ -404,9 +438,9 @@ connection.onreconnected(async () => {
   sendButton.disabled = false;
 
   /*
-      SignalR-grupper är kopplade till anslutningen.
-      Därför går vi med i rummet igen efter reconnect.
-    */
+    SignalR-grupper är kopplade till anslutningen.
+    Därför går vi med i rummet igen efter reconnect.
+  */
   if (selectedRoomId !== null) {
     try {
       await connection.invoke("JoinRoom", selectedRoomId);
@@ -579,6 +613,9 @@ function showLoggedInUser() {
 
   createRoomButton.disabled = false;
 
+  // Inbjudningsknappen visas bara i privata rum som användaren äger
+  inviteUserButton.classList.add("hidden");
+
   // Aktivera General
   if (generalRoomButton) {
     generalRoomButton.disabled = false;
@@ -612,6 +649,9 @@ function showLoggedOutUser() {
   messageInput.placeholder = "Logga in för att börja chatta...";
 
   createRoomButton.disabled = true;
+
+  // Dölj inbjudningsknappen när användaren är utloggad
+  inviteUserButton.classList.add("hidden");
 
   if (generalRoomButton) {
     generalRoomButton.disabled = true;
@@ -735,6 +775,11 @@ async function selectGeneralRoom() {
 
     roomDescription.textContent = "Global chatt för alla användare.";
 
+    // General har ingen inbjudningsknapp
+    inviteUserButton.classList.add("hidden");
+
+    closeInviteModal();
+
     setActiveRoomButton(null);
 
     messageInput.focus();
@@ -768,6 +813,8 @@ function renderRooms() {
   // Ta bort tidigare dynamiska rum
   clearDynamicRooms();
 
+  const privateRooms = availableRooms.filter((room) => room.isPrivate);
+
   for (const room of availableRooms) {
     const button = createRoomButtonElement(room);
 
@@ -777,6 +824,20 @@ function renderRooms() {
       roomList.appendChild(button);
     }
   }
+
+  // Visa information om inga privata rum finns
+  if (privateRooms.length === 0) {
+    const emptyPrivateRooms = document.createElement("p");
+
+    emptyPrivateRooms.className = "rooms__empty";
+
+    emptyPrivateRooms.textContent = "Inga privata rum ännu.";
+
+    privateRoomList.appendChild(emptyPrivateRooms);
+  }
+
+  // Behåll markeringen på aktivt rum efter omladdning
+  setActiveRoomButton(selectedRoomId);
 }
 
 // Skapar en knapp för ett rum
@@ -834,16 +895,18 @@ async function selectRoom(room) {
       return;
     }
 
-    // Lämna tidigare rum
-    if (selectedRoomId !== null) {
-      await connection.invoke("LeaveRoom", selectedRoomId);
-    }
+    const previousRoomId = selectedRoomId;
 
     /*
       Servern kontrollerar om användaren
       har behörighet till rummet.
     */
     await connection.invoke("JoinRoom", room.id);
+
+    // Lämna tidigare rum efter att nya rummet godkänts
+    if (previousRoomId !== null) {
+      await connection.invoke("LeaveRoom", previousRoomId);
+    }
 
     selectedRoomId = room.id;
 
@@ -855,6 +918,15 @@ async function selectRoom(room) {
     roomDescription.textContent = room.isPrivate
       ? "Privat chattrum"
       : "Offentligt chattrum";
+
+    // Endast ägaren till privata rum ser inbjudningsknappen
+    if (room.isPrivate && room.isOwner) {
+      inviteUserButton.classList.remove("hidden");
+    } else {
+      inviteUserButton.classList.add("hidden");
+    }
+
+    closeInviteModal();
 
     setActiveRoomButton(room.id);
 
@@ -966,6 +1038,97 @@ createRoomForm.addEventListener("submit", async (event) => {
       getSignalRErrorMessage(error, "Rummet kunde inte skapas."),
       "error",
     );
+  }
+});
+
+// =========================
+// Öppna inbjudnings-modal
+// =========================
+
+inviteUserButton.addEventListener("click", () => {
+  // Inbjudningar gäller endast ett valt privat rum
+  if (selectedRoomId === null) {
+    return;
+  }
+
+  inviteModal.classList.remove("hidden");
+
+  inviteUsernameInput.focus();
+});
+
+// =========================
+// Stäng inbjudnings-modal
+// =========================
+
+closeInviteModalButton.addEventListener("click", closeInviteModal);
+
+cancelInviteButton.addEventListener("click", closeInviteModal);
+
+const inviteModalBackdrop = inviteModal.querySelector(".modal__backdrop");
+
+if (inviteModalBackdrop) {
+  inviteModalBackdrop.addEventListener("click", closeInviteModal);
+}
+
+function closeInviteModal() {
+  inviteModal.classList.add("hidden");
+
+  inviteForm.reset();
+}
+
+// =========================
+// Bjud in användare
+// =========================
+
+inviteForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const invitedUsername = inviteUsernameInput.value.trim();
+
+  if (!invitedUsername) {
+    showNotification("Du måste ange ett användarnamn.", "error");
+
+    return;
+  }
+
+  if (selectedRoomId === null) {
+    showNotification("Du måste vara i ett privat rum.", "error");
+
+    return;
+  }
+
+  sendInviteButton.disabled = true;
+
+  sendInviteButton.textContent = "Bjuder in...";
+
+  try {
+    /*
+        Servern kontrollerar att:
+        - rummet är privat
+        - användaren finns
+        - den som bjuder in är ägare
+        - användaren inte redan är medlem
+      */
+    await connection.invoke(
+      "InviteUserToRoom",
+      selectedRoomId,
+      invitedUsername,
+    );
+
+    closeInviteModal();
+
+    showNotification(`${invitedUsername} har lagts till i rummet.`, "success");
+  } catch (error) {
+    console.error("InviteUserToRoom error:", error);
+
+    showNotification(
+      getSignalRErrorMessage(error, "Användaren kunde inte bjudas in."),
+      "error",
+    );
+  } finally {
+    sendInviteButton.disabled = false;
+
+    sendInviteButton.textContent = "Bjud in";
   }
 });
 

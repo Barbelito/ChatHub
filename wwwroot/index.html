@@ -1,4 +1,5 @@
 <!doctype html>
+
 <html lang="sv">
   <head>
     <meta charset="utf-8" />
@@ -28,6 +29,7 @@
 
           <div class="brand__text">
             <h1>ChatBook</h1>
+
             <p>SignalR Chat</p>
           </div>
         </div>
@@ -40,6 +42,7 @@
           <div class="section-heading">
             <div>
               <span class="section-label">Konto</span>
+
               <h2>Välkommen</h2>
             </div>
           </div>
@@ -214,6 +217,15 @@
           </div>
 
           <div class="chat__header-actions">
+            <!-- Bjud in användare till privat rum -->
+            <button
+              id="invite-user-button"
+              class="invite-button hidden"
+              type="button"
+            >
+              Bjud in användare
+            </button>
+
             <!-- SignalR-status -->
             <div
               id="connection-status"
@@ -367,6 +379,78 @@
     </div>
 
     <!-- =========================
+         Bjud in användare
+    ========================== -->
+
+    <div
+      id="invite-modal"
+      class="modal hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="invite-modal-title"
+    >
+      <div class="modal__backdrop"></div>
+
+      <div class="modal__content">
+        <div class="modal__header">
+          <div>
+            <span class="section-label"> Privat rum </span>
+
+            <h2 id="invite-modal-title">Bjud in användare</h2>
+          </div>
+
+          <button
+            id="close-invite-modal-button"
+            class="icon-button icon-button--dark"
+            type="button"
+            aria-label="Stäng"
+          >
+            ×
+          </button>
+        </div>
+
+        <form id="invite-form">
+          <!-- Användaren som ska bjudas in -->
+          <div class="form-field">
+            <label for="invite-username"> Användarnamn </label>
+
+            <input
+              id="invite-username"
+              name="inviteUsername"
+              type="text"
+              placeholder="Ange användarnamn"
+              maxlength="30"
+              autocomplete="off"
+              required
+            />
+          </div>
+
+          <p class="form-help">
+            Endast rummets ägare kan bjuda in nya medlemmar.
+          </p>
+
+          <div class="modal__actions">
+            <button
+              id="cancel-invite-button"
+              class="button button--secondary button--dark"
+              type="button"
+            >
+              Avbryt
+            </button>
+
+            <button
+              id="send-invite-button"
+              class="button button--primary"
+              type="submit"
+            >
+              Bjud in
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- =========================
          Notifieringar
     ========================== -->
 
@@ -377,8 +461,8 @@
       aria-atomic="true"
     ></div>
 
-    <!-- SignalR måste laddas före app.js -->
     <script src="lib/signalr.min.js"></script>
+
     <script src="app.js"></script>
   </body>
 </html>
