@@ -113,6 +113,19 @@ let selectedRoomId = null;
 let availableRooms = [];
 
 // =========================
+// Krypterings-state
+// =========================
+
+// Tillfälligt ECDH-nyckelpar
+let encryptionKeyPair = null;
+
+// Sessionsnyckel från ECDH och HKDF
+let sessionEncryptionKey = null;
+
+// AES-nycklar för General och rum
+const channelKeys = new Map();
+
+// =========================
 // SignalR
 // =========================
 
@@ -128,16 +141,25 @@ const connection = new signalR.HubConnectionBuilder()
 // Globala meddelanden
 // =========================
 
-// Tar emot meddelanden från General
-connection.on("ReceiveMessage", (sender, message) => {
+// Tar emot krypterade meddelanden från General
+connection.on("ReceiveMessage", async (sender, encryptedMessage) => {
   // Visa bara General-meddelanden i General
   if (selectedRoomId !== null) {
     return;
   }
 
-  const ownMessage = sender === username;
+  try {
+    // Dekryptera i browsern
+    const message = await decryptMessage(encryptedMessage, null);
 
-  addMessage(sender, message, ownMessage);
+    const ownMessage = sender === username;
+
+    addMessage(sender, message, ownMessage);
+  } catch (error) {
+    console.error("Decrypt message error:", error);
+
+    showNotification("Ett meddelande kunde inte dekrypteras.", "error");
+  }
 });
 
 // Tar emot systemmeddelanden från General
@@ -153,17 +175,29 @@ connection.on("ReceiveSystemMessage", (message) => {
 // Rumsmeddelanden
 // =========================
 
-// Tar emot meddelanden från ett chattrum
-connection.on("ReceiveRoomMessage", (roomId, sender, message) => {
-  // Visa bara meddelanden från aktivt rum
-  if (roomId !== selectedRoomId) {
-    return;
-  }
+// Tar emot krypterade meddelanden från ett rum
+connection.on(
+  "ReceiveRoomMessage",
+  async (roomId, sender, encryptedMessage) => {
+    // Visa bara meddelanden från aktivt rum
+    if (roomId !== selectedRoomId) {
+      return;
+    }
 
-  const ownMessage = sender === username;
+    try {
+      // Dekryptera i browsern
+      const message = await decryptMessage(encryptedMessage, roomId);
 
-  addMessage(sender, message, ownMessage);
-});
+      const ownMessage = sender === username;
+
+      addMessage(sender, message, ownMessage);
+    } catch (error) {
+      console.error("Decrypt room message error:", error);
+
+      showNotification("Ett meddelande kunde inte dekrypteras.", "error");
+    }
+  },
+);
 
 // Tar emot systemmeddelanden från ett rum
 connection.on("ReceiveRoomSystemMessage", (roomId, message) => {
@@ -329,7 +363,7 @@ async function login() {
     // Namnet används endast för UI
     username = enteredUsername;
 
-    // Starta SignalR med JWT
+    // Starta SignalR och kryptering
     await connectSignalR();
 
     // Visa inloggat UI
@@ -349,6 +383,8 @@ async function login() {
 
     accessToken = null;
     username = "";
+
+    clearEncryptionState();
 
     showAuthMessage("Inloggningen eller anslutningen misslyckades.", "error");
   } finally {
@@ -373,6 +409,9 @@ async function logout() {
   // Rensa autentisering
   accessToken = null;
   username = "";
+
+  // Rensa krypteringsnycklar
+  clearEncryptionState();
 
   // Rensa rum
   selectedRoomId = null;
@@ -415,7 +454,264 @@ async function connectSignalR() {
 
   await connection.start();
 
+  try {
+    // Starta ECDH-nyckelutbytet
+    await initializeEncryptionSession();
+  } catch (error) {
+    await connection.stop();
+
+    throw error;
+  }
+
   setConnectionStatus("Ansluten", "online");
+}
+
+// =========================
+// ECDH-nyckelutbyte
+// =========================
+
+async function initializeEncryptionSession() {
+  // Rensa gamla kanalnycklar
+  channelKeys.clear();
+
+  sessionEncryptionKey = null;
+
+  encryptionKeyPair = null;
+
+  /*
+    Skapa ett tillfälligt ECDH-nyckelpar.
+    Den privata nyckeln lämnar aldrig browsern.
+  */
+  encryptionKeyPair = await window.crypto.subtle.generateKey(
+    {
+      name: "ECDH",
+      namedCurve: "P-256",
+    },
+    true,
+    ["deriveBits"],
+  );
+
+  // Exportera endast den publika nyckeln
+  const clientPublicKey = await window.crypto.subtle.exportKey(
+    "spki",
+    encryptionKeyPair.publicKey,
+  );
+
+  // Skicka publik nyckel till servern
+  const response = await connection.invoke(
+    "ExchangeEncryptionPublicKey",
+    arrayBufferToBase64(clientPublicKey),
+  );
+
+  // Importera serverns publika nyckel
+  const serverPublicKey = await window.crypto.subtle.importKey(
+    "spki",
+    base64ToArrayBuffer(response.serverPublicKey),
+    {
+      name: "ECDH",
+      namedCurve: "P-256",
+    },
+    false,
+    [],
+  );
+
+  /*
+    Klientens privata nyckel och serverns
+    publika nyckel skapar samma shared secret.
+  */
+  const sharedSecret = await window.crypto.subtle.deriveBits(
+    {
+      name: "ECDH",
+      public: serverPublicKey,
+    },
+    encryptionKeyPair.privateKey,
+    256,
+  );
+
+  // Importera shared secret för HKDF
+  const keyMaterial = await window.crypto.subtle.importKey(
+    "raw",
+    sharedSecret,
+    "HKDF",
+    false,
+    ["deriveKey"],
+  );
+
+  /*
+    HKDF skapar en AES-256 sessionsnyckel.
+    Saltet kommer från servern.
+  */
+  sessionEncryptionKey = await window.crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+
+      hash: "SHA-256",
+
+      salt: base64ToArrayBuffer(response.salt),
+
+      info: new TextEncoder().encode("ChatBook-Key-Wrap-v1"),
+    },
+    keyMaterial,
+    {
+      name: "AES-GCM",
+      length: 256,
+    },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+// =========================
+// Kanalnyckel
+// =========================
+
+async function getChannelKey(roomId) {
+  const channelId = getChannelId(roomId);
+
+  // Återanvänd redan hämtad nyckel
+  if (channelKeys.has(channelId)) {
+    return channelKeys.get(channelId);
+  }
+
+  if (!sessionEncryptionKey) {
+    throw new Error("Krypteringssession saknas.");
+  }
+
+  /*
+    Servern skickar kanalens AES-nyckel
+    krypterad med sessionsnyckeln.
+  */
+  const encryptedKey = await connection.invoke(
+    "GetEncryptedChannelKey",
+    roomId,
+  );
+
+  const iv = new Uint8Array(base64ToArrayBuffer(encryptedKey.iv));
+
+  const ciphertext = new Uint8Array(
+    base64ToArrayBuffer(encryptedKey.ciphertext),
+  );
+
+  const tag = new Uint8Array(base64ToArrayBuffer(encryptedKey.tag));
+
+  /*
+    Web Crypto förväntar sig att
+    ciphertext och GCM-tag sitter ihop.
+  */
+  const combined = new Uint8Array(ciphertext.length + tag.length);
+
+  combined.set(ciphertext, 0);
+
+  combined.set(tag, ciphertext.length);
+
+  // Dekryptera kanalens AES-nyckel
+  const rawChannelKey = await window.crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: iv,
+      tagLength: 128,
+    },
+    sessionEncryptionKey,
+    combined,
+  );
+
+  // Importera kanalnyckeln som AES-256
+  const channelKey = await window.crypto.subtle.importKey(
+    "raw",
+    rawChannelKey,
+    {
+      name: "AES-GCM",
+    },
+    false,
+    ["encrypt", "decrypt"],
+  );
+
+  channelKeys.set(channelId, channelKey);
+
+  return channelKey;
+}
+
+function getChannelId(roomId) {
+  if (roomId === null) {
+    return "general";
+  }
+
+  return `room-${roomId}`;
+}
+
+// =========================
+// Kryptera meddelande
+// =========================
+
+async function encryptMessage(text, roomId) {
+  const key = await getChannelKey(roomId);
+
+  /*
+    Nytt slumpmässigt IV skapas
+    för varje AES-GCM-kryptering.
+  */
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+  const plaintext = new TextEncoder().encode(text);
+
+  // Binder meddelandet till rätt kanal
+  const additionalData = new TextEncoder().encode(getChannelId(roomId));
+
+  const encrypted = await window.crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: iv,
+      additionalData: additionalData,
+      tagLength: 128,
+    },
+    key,
+    plaintext,
+  );
+
+  return {
+    iv: arrayBufferToBase64(iv),
+
+    /*
+      Web Crypto returnerar ciphertext
+      och GCM-tag tillsammans.
+    */
+    ciphertext: arrayBufferToBase64(encrypted),
+  };
+}
+
+// =========================
+// Dekryptera meddelande
+// =========================
+
+async function decryptMessage(encryptedMessage, roomId) {
+  if (
+    !encryptedMessage ||
+    !encryptedMessage.iv ||
+    !encryptedMessage.ciphertext
+  ) {
+    throw new Error("Krypterat meddelande saknas.");
+  }
+
+  const key = await getChannelKey(roomId);
+
+  const iv = new Uint8Array(base64ToArrayBuffer(encryptedMessage.iv));
+
+  const ciphertext = base64ToArrayBuffer(encryptedMessage.ciphertext);
+
+  const additionalData = new TextEncoder().encode(getChannelId(roomId));
+
+  const decrypted = await window.crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: iv,
+      additionalData: additionalData,
+      tagLength: 128,
+    },
+    key,
+    ciphertext,
+  );
+
+  return new TextDecoder().decode(decrypted);
 }
 
 // =========================
@@ -432,28 +728,39 @@ connection.onreconnecting(() => {
 
 // Körs när SignalR har återanslutit
 connection.onreconnected(async () => {
-  setConnectionStatus("Ansluten", "online");
+  try {
+    /*
+        Ny SignalR-anslutning får nytt ConnectionId.
+        Därför skapas en ny krypteringssession.
+      */
+    await initializeEncryptionSession();
 
-  messageInput.disabled = false;
-  sendButton.disabled = false;
+    setConnectionStatus("Ansluten", "online");
 
-  /*
-    SignalR-grupper är kopplade till anslutningen.
-    Därför går vi med i rummet igen efter reconnect.
-  */
-  if (selectedRoomId !== null) {
-    try {
+    messageInput.disabled = false;
+
+    sendButton.disabled = false;
+
+    /*
+        SignalR-grupper är kopplade till anslutningen.
+        Därför går vi med i rummet igen efter reconnect.
+      */
+    if (selectedRoomId !== null) {
       await connection.invoke("JoinRoom", selectedRoomId);
-    } catch (error) {
-      console.error("Rejoin room error:", error);
-
-      await selectGeneralRoom();
     }
+
+    await loadRooms();
+
+    showNotification("Anslutningen återställdes.", "success");
+  } catch (error) {
+    console.error("Reconnect error:", error);
+
+    setConnectionStatus("Krypteringsfel", "offline");
+
+    messageInput.disabled = true;
+
+    sendButton.disabled = true;
   }
-
-  await loadRooms();
-
-  showNotification("Anslutningen återställdes.", "success");
 });
 
 // Körs när SignalR kopplas bort
@@ -461,7 +768,11 @@ connection.onclose(() => {
   setConnectionStatus("Ej ansluten", "offline");
 
   messageInput.disabled = true;
+
   sendButton.disabled = true;
+
+  // Rensa gamla sessionsnycklar
+  clearEncryptionState();
 });
 
 // =========================
@@ -477,6 +788,13 @@ sendForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  // Klienten tillåter max 500 tecken
+  if (text.length > 500) {
+    showNotification("Meddelandet får vara max 500 tecken.", "error");
+
+    return;
+  }
+
   if (connection.state !== signalR.HubConnectionState.Connected) {
     showNotification("Du är inte ansluten till chatten.", "error");
 
@@ -484,14 +802,24 @@ sendForm.addEventListener("submit", async (event) => {
   }
 
   try {
+    /*
+        Meddelandet krypteras innan
+        det skickas till SignalR.
+      */
+    const encryptedMessage = await encryptMessage(text, selectedRoomId);
+
     // General använder den globala chatten
     if (selectedRoomId === null) {
-      await connection.invoke("SendMessage", text);
+      await connection.invoke("SendMessage", encryptedMessage);
     }
 
     // Rum använder SignalR-grupper
     else {
-      await connection.invoke("SendRoomMessage", selectedRoomId, text);
+      await connection.invoke(
+        "SendRoomMessage",
+        selectedRoomId,
+        encryptedMessage,
+      );
     }
 
     messageInput.value = "";
@@ -768,6 +1096,9 @@ async function selectGeneralRoom() {
 
     selectedRoomId = null;
 
+    // Hämta General-nyckeln
+    await getChannelKey(null);
+
     // Rensa gamla meddelanden
     messages.replaceChildren();
 
@@ -785,6 +1116,8 @@ async function selectGeneralRoom() {
     messageInput.focus();
   } catch (error) {
     console.error("Select General error:", error);
+
+    showNotification("General kunde inte öppnas.", "error");
   }
 }
 
@@ -902,6 +1235,12 @@ async function selectRoom(room) {
       har behörighet till rummet.
     */
     await connection.invoke("JoinRoom", room.id);
+
+    /*
+      Hämta rummets AES-nyckel.
+      Privata rum kräver medlemskap på servern.
+    */
+    await getChannelKey(room.id);
 
     // Lämna tidigare rum efter att nya rummet godkänts
     if (previousRoomId !== null) {
@@ -1131,6 +1470,49 @@ inviteForm.addEventListener("submit", async (event) => {
     sendInviteButton.textContent = "Bjud in";
   }
 });
+
+// =========================
+// Krypteringshjälp
+// =========================
+
+// Rensar lokala krypteringsnycklar
+function clearEncryptionState() {
+  encryptionKeyPair = null;
+
+  sessionEncryptionKey = null;
+
+  channelKeys.clear();
+}
+
+// =========================
+// Base64 helpers
+// =========================
+
+// ArrayBuffer till Base64
+function arrayBufferToBase64(buffer) {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+
+  let binary = "";
+
+  for (let index = 0; index < bytes.length; index++) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+
+  return window.btoa(binary);
+}
+
+// Base64 till ArrayBuffer
+function base64ToArrayBuffer(base64) {
+  const binary = window.atob(base64);
+
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes.buffer;
+}
 
 // =========================
 // Notifieringar
