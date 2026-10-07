@@ -14,6 +14,9 @@ var builder = WebApplication.CreateBuilder(args);
 // Registrerar SignalR
 builder.Services.AddSignalR();
 
+// Registrerar ECDH och AES-nycklar hantrring
+builder.Services.AddSingleton<ChatEncryptionService>();
+
 // Konfigurerar Kestrel (stöd för både HTTP/1.1 och HTTP/2)
 builder.WebHost.ConfigureKestrel(kestrel =>
     kestrel.ConfigureEndpointDefaults(endpoint =>

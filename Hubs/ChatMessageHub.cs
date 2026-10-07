@@ -2,6 +2,7 @@ using System.Security.Claims;
 using ChatHub.Data;
 using ChatHub.DTOs;
 using ChatHub.Models;
+using ChatHub.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -13,37 +14,54 @@ namespace ChatHub.Hubs;
 public class ChatMessageHub : Hub
 {
     private readonly ChatDbContext _db;
+    private readonly ChatEncryptionService _encryption;
 
-    public ChatMessageHub(ChatDbContext db)
+    public ChatMessageHub(
+        ChatDbContext db,
+        ChatEncryptionService encryption)
     {
         _db = db;
+        _encryption = encryption;
     }
 
-    // Global chatt
 
-    public async Task SendMessage(string message)
+    // =========================
+// Global chatt
+// =========================
+
+public async Task SendMessage(
+    EncryptedMessageDto encryptedMessage)
+{
+    var username =
+        Context.User?.Identity?.Name;
+
+    if (string.IsNullOrWhiteSpace(username))
     {
-        var username = Context.User?.Identity?.Name;
-
-        if (string.IsNullOrWhiteSpace(username))
-            throw new HubException("Användaren kunde inte identifieras.");
-
-        message = message.Trim();
-
-        if (string.IsNullOrWhiteSpace(message))
-            return;
-
-        if (message.Length > 500)
-            throw new HubException("Meddelandet är för långt.");
-
-        await Clients.All.SendAsync(
-            "ReceiveMessage",
-            username,
-            message
+        throw new HubException(
+            "Användaren kunde inte identifieras."
         );
     }
 
-    // Hämtar rum användaren har tillgång till
+    // Kontrollera det krypterade meddelandet
+    ValidateEncryptedMessage(
+        encryptedMessage
+    );
+
+    /*
+        Servern vidarebefordrar endast ciphertext.
+        Servern behöver inte dekryptera meddelandet.
+    */
+    await Clients.All.SendAsync(
+        "ReceiveMessage",
+        username,
+        encryptedMessage
+    );
+}
+
+
+    // =========================
+    // Hämta rum
+    // =========================
 
     public async Task<List<RoomDto>> GetAvailableRooms()
     {
@@ -67,7 +85,10 @@ public class ChatMessageHub : Hub
             .ToListAsync();
     }
 
-    // Skapar ett nytt rum
+
+    // =========================
+    // Skapa rum
+    // =========================
 
     public async Task<RoomDto> CreateRoom(
         string roomName,
@@ -79,21 +100,31 @@ public class ChatMessageHub : Hub
 
         // Validera rumsnamn
         if (string.IsNullOrWhiteSpace(roomName))
-            throw new HubException("Rumsnamn krävs.");
+        {
+            throw new HubException(
+                "Rumsnamn krävs."
+            );
+        }
 
         if (roomName.Length > 100)
+        {
             throw new HubException(
                 "Rumsnamnet får vara max 100 tecken."
             );
+        }
 
         // Kontrollera att namnet är unikt
-        var roomExists = await _db.ChatRooms
-            .AnyAsync(room => room.Name == roomName);
+        var roomExists =
+            await _db.ChatRooms
+                .AnyAsync(room =>
+                    room.Name == roomName);
 
         if (roomExists)
+        {
             throw new HubException(
                 "Ett rum med det namnet finns redan."
             );
+        }
 
         var room = new ChatRoom
         {
@@ -129,7 +160,10 @@ public class ChatMessageHub : Hub
         };
     }
 
-    // Gå med i ett rum
+
+    // =========================
+    // Gå med i rum
+    // =========================
 
     public async Task JoinRoom(int roomId)
     {
@@ -142,13 +176,15 @@ public class ChatMessageHub : Hub
             );
 
         if (room is null)
+        {
             throw new HubException(
                 "Rummet kunde inte hittas."
             );
+        }
 
         // Kontrollera om användaren redan är medlem
-        var isMember = room.Members
-            .Any(member =>
+        var isMember =
+            room.Members.Any(member =>
                 member.UserId == userId);
 
         // Privata rum kräver medlemskap
@@ -195,118 +231,113 @@ public class ChatMessageHub : Hub
     }
 
 
-// =========================
-// Bjud in användare till privat rum
-// =========================
+    // =========================
+    // Bjud in användare
+    // =========================
 
-public async Task InviteUserToRoom(
-    int roomId,
-    string invitedUsername)
-{
-    var currentUserId = GetCurrentUserId();
-
-    invitedUsername = invitedUsername.Trim();
-
-    if (string.IsNullOrWhiteSpace(invitedUsername))
+    public async Task InviteUserToRoom(
+        int roomId,
+        string invitedUsername)
     {
-        throw new HubException(
-            "Användarnamn krävs."
-        );
-    }
+        var currentUserId =
+            GetCurrentUserId();
 
-    // Hämta rummet och dess medlemmar
-    var room = await _db.ChatRooms
-        .Include(room => room.Members)
-        .FirstOrDefaultAsync(
-            room => room.Id == roomId
-        );
+        invitedUsername =
+            invitedUsername.Trim();
 
-    if (room is null)
-    {
-        throw new HubException(
-            "Rummet kunde inte hittas."
-        );
-    }
-
-    // Inbjudningar används endast för privata rum
-    if (!room.IsPrivate)
-    {
-        throw new HubException(
-            "Endast privata rum kräver inbjudningar."
-        );
-    }
-
-    /*
-        Endast den som skapade rummet
-        får bjuda in andra användare.
-    */
-    if (room.CreatedByUserId != currentUserId)
-    {
-        throw new HubException(
-            "Endast rummets ägare får bjuda in användare."
-        );
-    }
-
-    // Hitta användaren i databasen
-    var invitedUser = await _db.Users
-        .FirstOrDefaultAsync(
-            user =>
-                user.Username.ToLower() ==
-                invitedUsername.ToLower()
-        );
-
-    if (invitedUser is null)
-    {
-        throw new HubException(
-            "Användaren kunde inte hittas."
-        );
-    }
-
-    // Kontrollera om användaren redan är medlem
-    var alreadyMember = room.Members
-        .Any(member =>
-            member.UserId == invitedUser.Id);
-
-    if (alreadyMember)
-    {
-        throw new HubException(
-            "Användaren är redan medlem i rummet."
-        );
-    }
-
-    // Lägg till användaren som medlem
-    _db.ChatRoomMembers.Add(
-        new ChatRoomMember
+        if (string.IsNullOrWhiteSpace(invitedUsername))
         {
-            ChatRoomId = room.Id,
-            UserId = invitedUser.Id
+            throw new HubException(
+                "Användarnamn krävs."
+            );
         }
-    );
 
-    await _db.SaveChangesAsync();
+        // Hämta rummet och dess medlemmar
+        var room = await _db.ChatRooms
+            .Include(room => room.Members)
+            .FirstOrDefaultAsync(
+                room => room.Id == roomId
+            );
 
-    /*
-        Om användaren är online skickas
-        en SignalR-notifiering direkt.
+        if (room is null)
+        {
+            throw new HubException(
+                "Rummet kunde inte hittas."
+            );
+        }
 
-        SignalR använder NameIdentifier från JWT
-        för att identifiera användaren.
-    */
-    await Clients
-        .User(invitedUser.Id.ToString())
-        .SendAsync(
-            "ReceiveRoomInvitation",
-            new RoomDto
+        // Inbjudningar används endast för privata rum
+        if (!room.IsPrivate)
+        {
+            throw new HubException(
+                "Endast privata rum kräver inbjudningar."
+            );
+        }
+
+        // Endast rummets ägare får bjuda in
+        if (room.CreatedByUserId != currentUserId)
+        {
+            throw new HubException(
+                "Endast rummets ägare får bjuda in användare."
+            );
+        }
+
+        // Hitta användaren i databasen
+        var invitedUser =
+            await _db.Users
+                .FirstOrDefaultAsync(user =>
+                    user.Username.ToLower() ==
+                    invitedUsername.ToLower());
+
+        if (invitedUser is null)
+        {
+            throw new HubException(
+                "Användaren kunde inte hittas."
+            );
+        }
+
+        // Kontrollera om användaren redan är medlem
+        var alreadyMember =
+            room.Members.Any(member =>
+                member.UserId == invitedUser.Id);
+
+        if (alreadyMember)
+        {
+            throw new HubException(
+                "Användaren är redan medlem i rummet."
+            );
+        }
+
+        // Lägg till användaren som medlem
+        _db.ChatRoomMembers.Add(
+            new ChatRoomMember
             {
-                Id = room.Id,
-                Name = room.Name,
-                IsPrivate = room.IsPrivate,
-                IsOwner = false
+                ChatRoomId = room.Id,
+                UserId = invitedUser.Id
             }
         );
+
+        await _db.SaveChangesAsync();
+
+        // Skicka notifiering om användaren är online
+        await Clients
+            .User(invitedUser.Id.ToString())
+            .SendAsync(
+                "ReceiveRoomInvitation",
+                new RoomDto
+                {
+                    Id = room.Id,
+                    Name = room.Name,
+                    IsPrivate = room.IsPrivate,
+                    IsOwner = false
+                }
+            );
     }
 
-    // Lämna ett SignalR-rum
+
+    // =========================
+    // Lämna SignalR-rum
+    // =========================
 
     public async Task LeaveRoom(int roomId)
     {
@@ -317,29 +348,29 @@ public async Task InviteUserToRoom(
         );
     }
 
-    // Skicka meddelande till ett rum
+
+    // =========================
+    // Skicka rumsmeddelande
+    // =========================
 
     public async Task SendRoomMessage(
         int roomId,
-        string message)
+        EncryptedMessageDto encryptedMessage)
     {
-        var userId = GetCurrentUserId();
+        var userId =
+            GetCurrentUserId();
 
-        message = message.Trim();
+        // Kontrollera det krypterade meddelandet
+        ValidateEncryptedMessage(
+            encryptedMessage
+        );
 
-        if (string.IsNullOrWhiteSpace(message))
-            return;
-
-        if (message.Length > 500)
-            throw new HubException(
-                "Meddelandet får vara max 500 tecken."
-            );
-
-        // Servern verifierar medlemskap innan meddelandet skickas
-        var isMember = await _db.ChatRoomMembers
-            .AnyAsync(member =>
-                member.ChatRoomId == roomId &&
-                member.UserId == userId);
+        // Kontrollera medlemskap
+        var isMember =
+            await _db.ChatRoomMembers
+                .AnyAsync(member =>
+                    member.ChatRoomId == roomId &&
+                    member.UserId == userId);
 
         if (!isMember)
         {
@@ -352,22 +383,122 @@ public async Task InviteUserToRoom(
             Context.User?.Identity?.Name;
 
         if (string.IsNullOrWhiteSpace(username))
+        {
             throw new HubException(
                 "Användaren kunde inte identifieras."
             );
+        }
 
-        // Skicka endast till användare i rummet
-        await Clients
-            .Group(GetGroupName(roomId))
-            .SendAsync(
-                "ReceiveRoomMessage",
-                roomId,
-                username,
-                message
-            );
+    /*
+        Servern skickar ciphertext endast
+        till SignalR-gruppen för rummet.
+    */
+    await Clients
+        .Group(GetGroupName(roomId))
+        .SendAsync(
+            "ReceiveRoomMessage",
+            roomId,
+            username,
+            encryptedMessage
+        );
     }
 
-    // Körs när en användare ansluter
+
+    // =========================
+    // Krypteringssession
+    // =========================
+
+    public KeyExchangeResponse ExchangeEncryptionPublicKey(
+        string clientPublicKey)
+    {
+        if (string.IsNullOrWhiteSpace(clientPublicKey))
+        {
+            throw new HubException(
+                "Publik nyckel saknas."
+            );
+        }
+
+        try
+        {
+            /*
+                Klienten skickar endast sin publika ECDH-nyckel.
+                Servern skapar därefter en gemensam sessionsnyckel.
+            */
+            return _encryption.CreateSession(
+                Context.ConnectionId,
+                clientPublicKey
+            );
+        }
+        catch (FormatException)
+        {
+            throw new HubException(
+                "Den publika nyckeln är ogiltig."
+            );
+        }
+        catch (Exception exception)
+            when (exception is not HubException)
+        {
+            throw new HubException(
+                "Nyckelutbytet misslyckades."
+            );
+        }
+    }
+
+
+    // =========================
+    // Hämta AES-nyckel
+    // =========================
+
+    public async Task<EncryptedKeyDto>
+        GetEncryptedChannelKey(int? roomId)
+    {
+        var userId = GetCurrentUserId();
+
+        // General använder en gemensam kanalnyckel
+        if (roomId is null)
+        {
+            return GetEncryptedChannelKey(
+                "general"
+            );
+        }
+
+        var room = await _db.ChatRooms
+            .Include(room => room.Members)
+            .FirstOrDefaultAsync(
+                room => room.Id == roomId.Value
+            );
+
+        if (room is null)
+        {
+            throw new HubException(
+                "Rummet kunde inte hittas."
+            );
+        }
+
+        // Privata rum kräver medlemskap
+        if (room.IsPrivate)
+        {
+            var isMember =
+                room.Members.Any(member =>
+                    member.UserId == userId);
+
+            if (!isMember)
+            {
+                throw new HubException(
+                    "Du har inte behörighet till rummets krypteringsnyckel."
+                );
+            }
+        }
+
+        return GetEncryptedChannelKey(
+            GetGroupName(room.Id)
+        );
+    }
+
+
+    // =========================
+    // Anslutning
+    // =========================
 
     public override async Task OnConnectedAsync()
     {
@@ -389,11 +520,19 @@ public async Task InviteUserToRoom(
         await base.OnConnectedAsync();
     }
 
-    // Körs när en användare kopplar från
+
+    // =========================
+    // Frånkoppling
+    // =========================
 
     public override async Task OnDisconnectedAsync(
         Exception? exception)
     {
+        // Ta bort krypteringssessionen
+        _encryption.RemoveSession(
+            Context.ConnectionId
+        );
+
         // Hämta sparat användarnamn
         if (
             Context.Items.TryGetValue(
@@ -408,10 +547,15 @@ public async Task InviteUserToRoom(
             );
         }
 
-        await base.OnDisconnectedAsync(exception);
+        await base.OnDisconnectedAsync(
+            exception
+        );
     }
 
+
+    // =========================
     // Hjälpmetoder
+    // =========================
 
     private int GetCurrentUserId()
     {
@@ -435,10 +579,90 @@ public async Task InviteUserToRoom(
         return userId;
     }
 
+
     private static string GetGroupName(
         int roomId)
     {
         // Skapar ett konsekvent gruppnamn
         return $"room-{roomId}";
+    }
+
+
+    private EncryptedKeyDto GetEncryptedChannelKey(
+        string channelId)
+    {
+        try
+        {
+            /*
+                Kanalens AES-nyckel krypteras med
+                sessionsnyckeln från ECDH.
+            */
+            return _encryption
+                .GetEncryptedChannelKey(
+                    Context.ConnectionId,
+                    channelId
+                );
+        }
+        catch (InvalidOperationException)
+        {
+            throw new HubException(
+                "Krypteringssession saknas. Gör ett nytt nyckelutbyte."
+            );
+        }
+    }
+    private static void ValidateEncryptedMessage(
+    EncryptedMessageDto message)
+    {
+        if (
+            message is null ||
+            string.IsNullOrWhiteSpace(message.Iv) ||
+            string.IsNullOrWhiteSpace(message.Ciphertext)
+        )
+        {
+            throw new HubException(
+                "Det krypterade meddelandet är ogiltigt."
+            );
+        }
+
+        try
+        {
+            var iv =
+                Convert.FromBase64String(
+                    message.Iv
+                );
+
+            var ciphertext =
+                Convert.FromBase64String(
+                    message.Ciphertext
+                );
+
+            // AES-GCM använder 12 bytes IV
+            if (iv.Length != 12)
+            {
+                throw new HubException(
+                    "Meddelandets IV är ogiltigt."
+                );
+            }
+
+            /*
+                Begränsar storleken även om servern
+                inte kan läsa klartexten.
+            */
+            if (
+                ciphertext.Length < 16 ||
+                ciphertext.Length > 4096
+            )
+            {
+                throw new HubException(
+                    "Det krypterade meddelandet har ogiltig storlek."
+                );
+            }
+        }
+        catch (FormatException)
+        {
+            throw new HubException(
+                "Det krypterade meddelandet har ogiltigt format."
+            );
+        }
     }
 }
