@@ -185,7 +185,7 @@ app.MapPost("/api/login", async (
         return Results.BadRequest("Fel användarnamn eller lösenord.");
 
     // Token skapas
-    var token = jwtService.GenerateToken(user.Username);
+    var token = jwtService.GenerateToken(user);
 
     // Token returneras till klienten
     return Results.Ok(new
