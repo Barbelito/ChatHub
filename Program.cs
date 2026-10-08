@@ -6,15 +6,18 @@ using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Threading.RateLimiting;
 using System.Text;
 using ChatHub.Services;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Registrerar SignalR
 builder.Services.AddSignalR();
 
-// Registrerar ECDH och AES-nycklar hantrring
+// Registrerar ECDH och AES-nyckelhantering
 builder.Services.AddSingleton<ChatEncryptionService>();
 
 // Konfigurerar Kestrel (stöd för både HTTP/1.1 och HTTP/2)
@@ -24,6 +27,9 @@ builder.WebHost.ConfigureKestrel(kestrel =>
 
 // Registrerar JWT service
 builder.Services.AddScoped<JwtService>();
+
+// Rate limiting för chatten
+builder.Services.AddSingleton<ChatRateLimiter>();
 
 // Registrera databasen
 builder.Services.AddDbContext<ChatDbContext>(options =>
@@ -102,16 +108,89 @@ builder.Services
         };
     });
 
+// =========================
+// Rate limiting
+// =========================
+
+builder.Services.AddRateLimiter(options =>
+{
+    // HTTP-status när gränsen nås
+    options.RejectionStatusCode =
+        StatusCodes.Status429TooManyRequests;
+
+    // Login och registrering
+    options.AddPolicy(
+        "auth",
+        context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey:
+                    context.Connection.RemoteIpAddress?.ToString()
+                    ?? "unknown",
+                factory: _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        // Max 5 försök per minut
+                        PermitLimit = 5,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }
+            )
+    );
+
+    // SignalR-anslutningar
+    options.AddPolicy(
+        "signalr",
+        context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey:
+                    context.Connection.RemoteIpAddress?.ToString()
+                    ?? "unknown",
+                factory: _ =>
+                    new FixedWindowRateLimiterOptions
+                    {
+                        // Max 30 anslutningsförsök per minut
+                        PermitLimit = 30,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }
+            )
+    );
+
+    // Svar när användaren når gränsen
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        if (!context.HttpContext.Response.HasStarted)
+        {
+            await context.HttpContext.Response.WriteAsJsonAsync(
+                new
+                {
+                    message = "För många försök. Försök igen senare."
+                },
+                cancellationToken
+            );
+        }
+    };
+});
+
 // Aktiverar authorization (krav på roller, policies, [Authorize]-attribut)
 builder.Services.AddAuthorization();
+
 
 var app = builder.Build();
 
 // Omdirigerar HTTP till HTTPS
 app.UseHttpsRedirection();
 
+// Aktiverar routing
+app.UseRouting();
+
 // Aktiverar CORS
 app.UseCors();
+
+// Aktiverar rate limiting
+app.UseRateLimiter();
 
 // API - Registrering
 app.MapPost("/api/register", async (
@@ -158,7 +237,8 @@ app.MapPost("/api/register", async (
 
     // Bekräfta att kontot skapades
     return Results.Ok("Kontot skapades.");
-});
+})
+.RequireRateLimiting("auth");
 
 // API - Inloggning
 app.MapPost("/api/login", async (
@@ -195,7 +275,8 @@ app.MapPost("/api/login", async (
     {
         token
     });
-});
+})
+.RequireRateLimiting("auth");
 
 // Serverar filer från wwwroot
 app.UseDefaultFiles();
@@ -206,6 +287,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // Mappar SignalR-hubben
-app.MapHub<ChatMessageHub>("/chatHub");
+app.MapHub<ChatMessageHub>("/chatHub")
+    .RequireRateLimiting("signalr");
 
 app.Run();

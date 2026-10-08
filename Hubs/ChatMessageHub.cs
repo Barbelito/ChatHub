@@ -15,48 +15,53 @@ public class ChatMessageHub : Hub
 {
     private readonly ChatDbContext _db;
     private readonly ChatEncryptionService _encryption;
+    private readonly ChatRateLimiter _rateLimiter;
 
     public ChatMessageHub(
         ChatDbContext db,
-        ChatEncryptionService encryption)
+        ChatEncryptionService encryption,
+        ChatRateLimiter rateLimiter)
     {
         _db = db;
         _encryption = encryption;
+        _rateLimiter = rateLimiter;
     }
 
 
     // =========================
-// Global chatt
-// =========================
+    // Global chatt
+    // =========================
 
-public async Task SendMessage(
-    EncryptedMessageDto encryptedMessage)
-{
-    var username =
-        Context.User?.Identity?.Name;
-
-    if (string.IsNullOrWhiteSpace(username))
+    public async Task SendMessage(
+        EncryptedMessageDto encryptedMessage)
     {
-        throw new HubException(
-            "Användaren kunde inte identifieras."
+        var userId = GetCurrentUserId();
+
+        // Kontrollera rate limit
+        EnsureMessageRateLimit(userId);
+
+        var username = Context.User?.Identity?.Name;
+
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            throw new HubException(
+                "Användaren kunde inte identifieras."
+            );
+        }
+
+        // Kontrollera det krypterade meddelandet
+        ValidateEncryptedMessage(encryptedMessage);
+
+        /*
+            Servern vidarebefordrar endast ciphertext.
+            Servern behöver inte dekryptera meddelandet.
+        */
+        await Clients.All.SendAsync(
+            "ReceiveMessage",
+            username,
+            encryptedMessage
         );
     }
-
-    // Kontrollera det krypterade meddelandet
-    ValidateEncryptedMessage(
-        encryptedMessage
-    );
-
-    /*
-        Servern vidarebefordrar endast ciphertext.
-        Servern behöver inte dekryptera meddelandet.
-    */
-    await Clients.All.SendAsync(
-        "ReceiveMessage",
-        username,
-        encryptedMessage
-    );
-}
 
 
     // =========================
@@ -78,8 +83,7 @@ public async Task SendMessage(
                 Id = room.Id,
                 Name = room.Name,
                 IsPrivate = room.IsPrivate,
-                IsOwner =
-                    room.CreatedByUserId == userId
+                IsOwner = room.CreatedByUserId == userId
             })
             .OrderBy(room => room.Name)
             .ToListAsync();
@@ -114,10 +118,8 @@ public async Task SendMessage(
         }
 
         // Kontrollera att namnet är unikt
-        var roomExists =
-            await _db.ChatRooms
-                .AnyAsync(room =>
-                    room.Name == roomName);
+        var roomExists = await _db.ChatRooms
+            .AnyAsync(room => room.Name == roomName);
 
         if (roomExists)
         {
@@ -171,9 +173,7 @@ public async Task SendMessage(
 
         var room = await _db.ChatRooms
             .Include(room => room.Members)
-            .FirstOrDefaultAsync(
-                room => room.Id == roomId
-            );
+            .FirstOrDefaultAsync(room => room.Id == roomId);
 
         if (room is null)
         {
@@ -183,9 +183,8 @@ public async Task SendMessage(
         }
 
         // Kontrollera om användaren redan är medlem
-        var isMember =
-            room.Members.Any(member =>
-                member.UserId == userId);
+        var isMember = room.Members
+            .Any(member => member.UserId == userId);
 
         // Privata rum kräver medlemskap
         if (room.IsPrivate && !isMember)
@@ -215,8 +214,7 @@ public async Task SendMessage(
             GetGroupName(room.Id)
         );
 
-        var username =
-            Context.User?.Identity?.Name;
+        var username = Context.User?.Identity?.Name;
 
         if (!string.IsNullOrWhiteSpace(username))
         {
@@ -239,11 +237,9 @@ public async Task SendMessage(
         int roomId,
         string invitedUsername)
     {
-        var currentUserId =
-            GetCurrentUserId();
+        var currentUserId = GetCurrentUserId();
 
-        invitedUsername =
-            invitedUsername.Trim();
+        invitedUsername = invitedUsername.Trim();
 
         if (string.IsNullOrWhiteSpace(invitedUsername))
         {
@@ -255,9 +251,7 @@ public async Task SendMessage(
         // Hämta rummet och dess medlemmar
         var room = await _db.ChatRooms
             .Include(room => room.Members)
-            .FirstOrDefaultAsync(
-                room => room.Id == roomId
-            );
+            .FirstOrDefaultAsync(room => room.Id == roomId);
 
         if (room is null)
         {
@@ -283,11 +277,10 @@ public async Task SendMessage(
         }
 
         // Hitta användaren i databasen
-        var invitedUser =
-            await _db.Users
-                .FirstOrDefaultAsync(user =>
-                    user.Username.ToLower() ==
-                    invitedUsername.ToLower());
+        var invitedUser = await _db.Users
+            .FirstOrDefaultAsync(user =>
+                user.Username.ToLower() ==
+                invitedUsername.ToLower());
 
         if (invitedUser is null)
         {
@@ -297,8 +290,8 @@ public async Task SendMessage(
         }
 
         // Kontrollera om användaren redan är medlem
-        var alreadyMember =
-            room.Members.Any(member =>
+        var alreadyMember = room.Members
+            .Any(member =>
                 member.UserId == invitedUser.Id);
 
         if (alreadyMember)
@@ -357,20 +350,19 @@ public async Task SendMessage(
         int roomId,
         EncryptedMessageDto encryptedMessage)
     {
-        var userId =
-            GetCurrentUserId();
+        var userId = GetCurrentUserId();
+
+        // Kontrollera rate limit
+        EnsureMessageRateLimit(userId);
 
         // Kontrollera det krypterade meddelandet
-        ValidateEncryptedMessage(
-            encryptedMessage
-        );
+        ValidateEncryptedMessage(encryptedMessage);
 
         // Kontrollera medlemskap
-        var isMember =
-            await _db.ChatRoomMembers
-                .AnyAsync(member =>
-                    member.ChatRoomId == roomId &&
-                    member.UserId == userId);
+        var isMember = await _db.ChatRoomMembers
+            .AnyAsync(member =>
+                member.ChatRoomId == roomId &&
+                member.UserId == userId);
 
         if (!isMember)
         {
@@ -379,8 +371,7 @@ public async Task SendMessage(
             );
         }
 
-        var username =
-            Context.User?.Identity?.Name;
+        var username = Context.User?.Identity?.Name;
 
         if (string.IsNullOrWhiteSpace(username))
         {
@@ -389,18 +380,18 @@ public async Task SendMessage(
             );
         }
 
-    /*
-        Servern skickar ciphertext endast
-        till SignalR-gruppen för rummet.
-    */
-    await Clients
-        .Group(GetGroupName(roomId))
-        .SendAsync(
-            "ReceiveRoomMessage",
-            roomId,
-            username,
-            encryptedMessage
-        );
+        /*
+            Servern skickar ciphertext endast
+            till SignalR-gruppen för rummet.
+        */
+        await Clients
+            .Group(GetGroupName(roomId))
+            .SendAsync(
+                "ReceiveRoomMessage",
+                roomId,
+                username,
+                encryptedMessage
+            );
     }
 
 
@@ -449,24 +440,21 @@ public async Task SendMessage(
     // Hämta AES-nyckel
     // =========================
 
-    public async Task<EncryptedKeyDto>
-        GetEncryptedChannelKey(int? roomId)
+    public async Task<EncryptedKeyDto> GetEncryptedChannelKey(
+        int? roomId)
     {
         var userId = GetCurrentUserId();
 
         // General använder en gemensam kanalnyckel
         if (roomId is null)
         {
-            return GetEncryptedChannelKey(
-                "general"
-            );
+            return GetEncryptedChannelKey("general");
         }
 
         var room = await _db.ChatRooms
             .Include(room => room.Members)
             .FirstOrDefaultAsync(
-                room => room.Id == roomId.Value
-            );
+                room => room.Id == roomId.Value);
 
         if (room is null)
         {
@@ -478,8 +466,8 @@ public async Task SendMessage(
         // Privata rum kräver medlemskap
         if (room.IsPrivate)
         {
-            var isMember =
-                room.Members.Any(member =>
+            var isMember = room.Members
+                .Any(member =>
                     member.UserId == userId);
 
             if (!isMember)
@@ -502,12 +490,10 @@ public async Task SendMessage(
 
     public override async Task OnConnectedAsync()
     {
-        var username =
-            Context.User?.Identity?.Name;
+        var username = Context.User?.Identity?.Name;
 
         // Sparas för senare användning
-        Context.Items["Username"] =
-            username;
+        Context.Items["Username"] = username;
 
         if (!string.IsNullOrWhiteSpace(username))
         {
@@ -560,16 +546,11 @@ public async Task SendMessage(
     private int GetCurrentUserId()
     {
         // UserId hämtas från den verifierade JWT-token
-        var userIdClaim =
-            Context.User?.FindFirst(
-                ClaimTypes.NameIdentifier
-            )?.Value;
+        var userIdClaim = Context.User?
+            .FindFirst(ClaimTypes.NameIdentifier)?
+            .Value;
 
-        if (
-            !int.TryParse(
-                userIdClaim,
-                out var userId
-            ))
+        if (!int.TryParse(userIdClaim, out var userId))
         {
             throw new HubException(
                 "Användaren kunde inte identifieras."
@@ -580,11 +561,22 @@ public async Task SendMessage(
     }
 
 
-    private static string GetGroupName(
-        int roomId)
+    private static string GetGroupName(int roomId)
     {
         // Skapar ett konsekvent gruppnamn
         return $"room-{roomId}";
+    }
+
+
+    private void EnsureMessageRateLimit(int userId)
+    {
+        // Stoppa användaren om gränsen har nåtts
+        if (!_rateLimiter.AllowMessage(userId))
+        {
+            throw new HubException(
+                "Du skickar meddelanden för snabbt. Vänta några sekunder."
+            );
+        }
     }
 
 
@@ -597,11 +589,10 @@ public async Task SendMessage(
                 Kanalens AES-nyckel krypteras med
                 sessionsnyckeln från ECDH.
             */
-            return _encryption
-                .GetEncryptedChannelKey(
-                    Context.ConnectionId,
-                    channelId
-                );
+            return _encryption.GetEncryptedChannelKey(
+                Context.ConnectionId,
+                channelId
+            );
         }
         catch (InvalidOperationException)
         {
@@ -610,14 +601,15 @@ public async Task SendMessage(
             );
         }
     }
+
+
     private static void ValidateEncryptedMessage(
-    EncryptedMessageDto message)
+        EncryptedMessageDto message)
     {
         if (
             message is null ||
             string.IsNullOrWhiteSpace(message.Iv) ||
-            string.IsNullOrWhiteSpace(message.Ciphertext)
-        )
+            string.IsNullOrWhiteSpace(message.Ciphertext))
         {
             throw new HubException(
                 "Det krypterade meddelandet är ogiltigt."
@@ -626,15 +618,13 @@ public async Task SendMessage(
 
         try
         {
-            var iv =
-                Convert.FromBase64String(
-                    message.Iv
-                );
+            var iv = Convert.FromBase64String(
+                message.Iv
+            );
 
-            var ciphertext =
-                Convert.FromBase64String(
-                    message.Ciphertext
-                );
+            var ciphertext = Convert.FromBase64String(
+                message.Ciphertext
+            );
 
             // AES-GCM använder 12 bytes IV
             if (iv.Length != 12)
@@ -650,8 +640,7 @@ public async Task SendMessage(
             */
             if (
                 ciphertext.Length < 16 ||
-                ciphertext.Length > 4096
-            )
+                ciphertext.Length > 4096)
             {
                 throw new HubException(
                     "Det krypterade meddelandet har ogiltig storlek."
